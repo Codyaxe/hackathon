@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESG Hub — Sustainability Dashboard</title>
+    <meta name="description" content="Track your company's environmental impact, carbon footprint, and sustainability progress." />
+    <script>
+      const t = localStorage.getItem('esg_theme')
+      const theme = t ? JSON.parse(t).state?.theme || 'dark' : 'dark'
+      document.documentElement.classList.add(theme)
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
