@@ -11,6 +11,7 @@ class Services:
         self.ai = request.app.state.ai
         self.GRI302Engine = request.app.state.GRI302Engine
         self.GRI305Engine = request.app.state.GRI305Engine
+        self.GRI401Engine = request.app.state.GRI401Engine
 
 
 

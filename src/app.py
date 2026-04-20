@@ -13,17 +13,23 @@ from src.gris.gri_302_computations import GRI_302_FUNCTIONS
 from src.schemas.output_schemas import GRI_302_REQUIREMENTS
 from src.gris.gri_305_computations import GRI_305_FUNCTIONS
 from src.schemas.output_schemas import GRI_305_REQUIREMENTS
+from src.gris.gri_401_computations import GRI_401_FUNCTIONS
+from src.schemas.output_schemas import GRI_401_REQUIREMENTS
 
 
 
 
 load_dotenv()
 
+
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.ai = genai.Client(api_key=os.environ.get("GEMINI_API_KEY")).aio
     app.state.GRI302Engine = GRIEngine(GRI_302_FUNCTIONS, GRI_302_REQUIREMENTS)
     app.state.GRI305Engine = GRIEngine(GRI_305_FUNCTIONS, GRI_305_REQUIREMENTS)
+    app.state.GRI401Engine = GRIEngine(GRI_401_FUNCTIONS, GRI_401_REQUIREMENTS)
     yield
     ...
 
@@ -70,10 +76,16 @@ async def get_esg_report(inputs: ExtractionPromptSchema, services: Services = De
         }
 
     if extracted_data.detected_gri == "GRI_401":
-        raise HTTPException(
-            status_code=501,
-            detail="GRI standard not yet implemented",
-        )
+        computations = services.GRI401Engine.run(extracted_data.data)
+        return {
+            "extracted_data":extracted_data,
+            "processed_data":{
+                "401_1_result": computations["401_1"],
+                "401_2_result": computations["401_2"],
+                "401_3_result": computations["401_3"],
+                "summary": computations["summary"],
+                }
+        }
 
 
 

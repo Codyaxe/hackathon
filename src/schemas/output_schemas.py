@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Dict, Literal, Optional, Union, List
 from src.schemas.MetricsSchemas.GRI_302_Metrics import EnergyEntry, ConversionFactors, Omission302
 from src.schemas.MetricsSchemas.GRI_305_Metrics import EmissionEntry, EmissionFactorMetadata, Omission305
-from src.schemas.MetricsSchemas.GRI_401_Metrics import Omission401
+from src.schemas.MetricsSchemas.GRI_401_Metrics import BenefitEntry, BreakdownByAgeGroup, BreakdownByGender, BreakdownByRegion, Omission401, GenderRate, ParentalLeaveByGender
 
 
 
@@ -371,19 +371,184 @@ class AIExtracted_GRI_305(BaseModel):
 
 
 # ============================================================================
-# PLACEHOLDER SCHEMAS FOR OTHER GRI STANDARDS (TODO)
+# UNIFIED GRI 401 (EMPLOYMENT) SCHEMA
 # ============================================================================
 
 class AIExtracted_GRI_401(BaseModel):
-    """Placeholder for GRI 401 (Employment) schema."""
+    """
+    Unified schema for GRI 401 (Employment) standard covering all sub-standards.
 
-    base_year: Optional[str] = None
-    omitted_fields: Optional[list[Omission302]]
+    This schema consolidates data points from:
+    - GRI 401-1: New Employee Hires and Employee Turnover
+    - GRI 401-2: Benefits Provided to Full-Time Employees
+    - GRI 401-3: Parental Leave (Optional)
 
+    All fields are optional to accommodate partial data extraction.
+    Use omitted_fields to track explanations for missing data.
+    """
 
+    # ---- GRI 401-1: New Hires ----
+    total_new_hires: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Total number of new employees hired during the reporting period. "
+            "Always extract if mentioned — never leave null when a headcount is stated."
+        )
+    )
+ 
+    new_hire_rate: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description=(
+            "New hire rate as a percentage. Formula: (total_new_hires / total_employees) × 100. "
+            "Compute this if total_new_hires and employee_count are both present. "
+            "Set to null only if neither is available."
+        )
+    )
+ 
+    new_hires_by_gender: Optional[BreakdownByGender] = Field(
+        default=None,
+        description=(
+            "New hires broken down by gender. "
+            "Populate only the genders explicitly mentioned. Set to null if no gender breakdown is provided."
+        )
+    )
+ 
+    new_hires_by_age_group: Optional[BreakdownByAgeGroup] = Field(
+        default=None,
+        description=(
+            "New hires broken down by age group (under 30, 30–50, over 50). "
+            "Set to null if no age breakdown is provided."
+        )
+    )
+ 
+    new_hires_by_region: Optional[List[BreakdownByRegion]] = Field(
+        default=None,
+        description=(
+            "New hires broken down by region or location of operation. "
+            "One entry per region. Set to null if no regional breakdown is provided."
+        )
+    )
+ 
+    # ---- GRI 401-1: Turnover ----
+    total_turnover: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Total number of employees who left during the reporting period. "
+            "Always extract if mentioned — never leave null when a count is stated."
+        )
+    )
+ 
+    turnover_rate: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Employee turnover rate as a percentage. Formula: (total_turnover / total_employees) × 100. "
+            "Compute this if total_turnover and employee_count are both present. "
+            "Set to null only if neither is available."
+        )
+    )
+ 
+    turnover_by_gender: Optional[BreakdownByGender] = Field(
+        default=None,
+        description=(
+            "Employees who left broken down by gender. "
+            "Populate only the genders explicitly mentioned. Set to null if no gender breakdown is provided."
+        )
+    )
+ 
+    turnover_by_age_group: Optional[BreakdownByAgeGroup] = Field(
+        default=None,
+        description=(
+            "Employees who left broken down by age group (under 30, 30–50, over 50). "
+            "Set to null if no age breakdown is provided."
+        )
+    )
+ 
+    turnover_by_region: Optional[List[BreakdownByRegion]] = Field(
+        default=None,
+        description=(
+            "Employees who left broken down by region or location of operation. "
+            "One entry per region. Set to null if no regional breakdown is provided."
+        )
+    )
+ 
+    # ---- GRI 401-2: Benefits ----
+    benefits: Optional[List[BenefitEntry]] = Field(
+        default=None,
+        description=(
+            "List of benefits and whether they are provided to full-time vs part-time/temporary employees. "
+            "One entry per distinct benefit. Do not merge benefits into one entry. "
+            "Exclude in-kind benefits (free meals, transport allowance, gym access) per GRI 401-2 guidelines."
+        )
+    )
+ 
+    significant_location: Optional[str] = Field(
+        default=None,
+        description=(
+            "The significant location of operation where benefits apply. "
+            "E.g. 'Quezon City, NCR'. Set to null if not mentioned."
+        )
+    )
+ 
+    # ---- GRI 401-3: Parental Leave ----
+    parental_leave_by_gender: Optional[List[ParentalLeaveByGender]] = Field(
+        default=None,
+        description=(
+            "Parental leave data broken down by gender, covering entitlement, uptake, "
+            "return to work, and 12-month retention. One entry per gender. "
+            "Set to null if no parental leave was taken or data is unavailable."
+        )
+    )
+ 
+    return_to_work_rate_by_gender: Optional[List[GenderRate]] = Field(
+        default=None,
+        description=(
+            "Return-to-work rate after parental leave by gender. "
+            "Compute as (returned_to_work / took_leave) × 100 if data is available. "
+            "Set to null if parental leave data is unavailable."
+        )
+    )
+
+    retention_rate_by_gender: Optional[List[GenderRate]] = Field(
+        default=None,
+        description=(
+            "12-month retention rate after returning from parental leave, by gender. "
+            "Compute as (still_employed_after_12_months / returned_to_work) × 100 if data is available. "
+            "Set to null if parental leave data is unavailable."
+        )
+    )
+    
+    # ---- Metadata ----
+    employee_count: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Total employee headcount at the time of reporting. "
+            "Used as the denominator for new_hire_rate and turnover_rate calculations. "
+            "Use the stated number even if part-time status is ambiguous."
+        )
+    )
+ 
+    base_year: Optional[str] = Field(
+        default=None,
+        description="Reporting period year (YYYY). Extract from context (e.g. 'January 2025' → '2025'). Set to null only if no time reference exists."
+    )
+ 
+    # ---- Explainability ----
+    omitted_fields: Optional[List[Omission401]] = Field(
+        default_factory=list,
+        description=(
+            "List of fields that could not be populated, each with a field_name and a specific reason. "
+            "Only include fields genuinely absent from the input. "
+            "Do not list fields set to 0.0 or successfully computed."
+        )
+    )
 
 # ============================================================================
-# TOP-LEVEL RESULT MODEL
+# UNIFIED GRI 401 (EMPLOYMENT) SCHEMA
 # ============================================================================
 
 class ExtractedData(BaseModel):
@@ -406,12 +571,13 @@ class ExtractedData(BaseModel):
     )
 
 
+
+
+
+
 # =========================
 # Output Schema Validation|
 # =========================
-
-
-
 
 
 
@@ -455,6 +621,23 @@ GRI_305_REQUIREMENTS = {
     "305_7": ["nox_kg", "sox_kg", "base_year"]
 }
 
+
+GRI_401_REQUIREMENTS = {
+    "401_1": [
+        "total_new_hires",
+        "total_turnover",
+        "employee_count",
+        "base_year"
+    ],
+    "401_2": [
+        "benefits",
+        "base_year"
+    ],
+    "401_3": [
+        "parental_leave_by_gender",
+        "base_year"
+    ]
+}
 
 def has_required_fields(data: BaseModel, required_fields: List[str]) -> bool:
     """

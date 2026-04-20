@@ -147,7 +147,7 @@ class Omission305(BaseModel):
     ] = Field(
         description=(
             "The exact field name that could not be populated. "
-            "Must be one of the defined GRI 302 fields. "
+            "Must be one of the defined GRI 305 fields. "
             "Do not invent field names outside this list."
         )
     )
