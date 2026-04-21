@@ -26,7 +26,10 @@ from src.schemas.output_schemas import can_compute
 # HELPER FUNCTIONS
 # ============================================================================
 
-def _calculate_year_span(baseline_year: Optional[str], reporting_year: Optional[str]) -> Optional[int]:
+
+def _calculate_year_span(
+    baseline_year: Optional[str], reporting_year: Optional[str]
+) -> Optional[int]:
     if baseline_year is None or reporting_year is None:
         return None
     try:
@@ -37,8 +40,7 @@ def _calculate_year_span(baseline_year: Optional[str], reporting_year: Optional[
 
 def _get_missing_fields(data: AIExtracted_GRI_302, substandard: str) -> list[str]:
     return [
-        f for f in GRI_302_REQUIREMENTS[substandard]
-        if getattr(data, f, None) is None
+        f for f in GRI_302_REQUIREMENTS[substandard] if getattr(data, f, None) is None
     ]
 
 
@@ -48,7 +50,7 @@ def _not_computed(missing_fields: list[str], unit: str) -> Dict[str, Any]:
         "value": None,
         "unit": unit,
         "metadata": {},
-        "reason": f"Missing required fields: {', '.join(missing_fields)}"
+        "reason": f"Missing required fields: {', '.join(missing_fields)}",
     }
 
 
@@ -56,16 +58,17 @@ def _not_computed(missing_fields: list[str], unit: str) -> Dict[str, Any]:
 # COMPUTATION FUNCTIONS FOR EACH GRI 302 SUB-STANDARD
 # ============================================================================
 
+
 def compute_302_1_energy_totals(data: AIExtracted_GRI_302) -> Dict[str, Any]:
     """
     Compute GRI 302-1: Energy Consumption Within the Organization.
 
     Calculates total energy consumption broken down by renewable
     and non-renewable sources.
-    
+
     Args:
         data: AIExtracted_GRI_302 instance with energy data
-    
+
     Returns:
         Dict with structure:
         {
@@ -93,8 +96,10 @@ def compute_302_1_energy_totals(data: AIExtracted_GRI_302) -> Dict[str, Any]:
         return _not_computed(_get_missing_fields(data, "302_1"), "MJ")
 
     renewable_pct = 0.0
-    if data.total_energy_mj and data.total_energy_mj > 0:
-        renewable_pct = (data.renewable_energy_mj / data.total_energy_mj) * 100
+    total_energy_mj = data.total_energy_mj or 0.0
+    renewable_energy_mj = data.renewable_energy_mj or 0.0
+    if total_energy_mj > 0:
+        renewable_pct = (renewable_energy_mj / total_energy_mj) * 100
 
     return {
         "computed": True,
@@ -102,15 +107,17 @@ def compute_302_1_energy_totals(data: AIExtracted_GRI_302) -> Dict[str, Any]:
             "total_energy_mj": data.total_energy_mj,
             "renewable_energy_mj": data.renewable_energy_mj,
             "non_renewable_energy_mj": data.non_renewable_energy_mj,
-            "renewable_percentage": renewable_pct
+            "renewable_percentage": renewable_pct,
         },
         "unit": "MJ",
         "metadata": {
             "base_year": data.base_year,
-            "energy_entries_count": len(data.energy_entries) if data.energy_entries else 0,
-            "conversion_factors_used": data.conversion_factors is not None
+            "energy_entries_count": (
+                len(data.energy_entries) if data.energy_entries else 0
+            ),
+            "conversion_factors_used": data.conversion_factors is not None,
         },
-        "reason": None
+        "reason": None,
     }
 
 
@@ -143,9 +150,9 @@ def compute_302_2_external_energy(data: AIExtracted_GRI_302) -> Dict[str, Any]:
         "unit": "MJ",
         "metadata": {
             "base_year": data.base_year,
-            "source": "Purchased electricity, steam, heating, or cooling"
+            "source": "Purchased electricity, steam, heating, or cooling",
         },
-        "reason": None
+        "reason": None,
     }
 
 
@@ -212,9 +219,9 @@ def compute_302_3_intensity(data: AIExtracted_GRI_302) -> Dict[str, Any]:
             "denominator_type": denominator_type,
             "denominator_value": denominator_value,
             "total_energy_mj": data.total_energy_mj,
-            "specified_denominator": data.intensity_denominator
+            "specified_denominator": data.intensity_denominator,
         },
-        "reason": None
+        "reason": None,
     }
 
 
@@ -255,28 +262,28 @@ def compute_302_4_reduction(data: AIExtracted_GRI_302) -> Dict[str, Any]:
     reduction_percentage = None
     baseline_energy = None
 
+    reduction_mj = data.energy_reduction_mj or 0.0
     if data.total_energy_mj is not None and data.total_energy_mj >= 0:
-        baseline_energy = data.total_energy_mj + data.energy_reduction_mj
+        baseline_energy = data.total_energy_mj + reduction_mj
         reduction_percentage = (
-            (data.energy_reduction_mj / baseline_energy) * 100
-            if baseline_energy > 0 else 0.0
+            (reduction_mj / baseline_energy) * 100 if baseline_energy > 0 else 0.0
         )
 
     return {
         "computed": True,
         "value": {
-            "reduction_mj": data.energy_reduction_mj,
+            "reduction_mj": reduction_mj,
             "reduction_percentage": reduction_percentage,
             "baseline_energy_mj": baseline_energy,
-            "current_energy_mj": data.total_energy_mj
+            "current_energy_mj": data.total_energy_mj,
         },
         "unit": "MJ",
         "metadata": {
             "baseline_year": data.baseline_year,
             "reporting_year": data.base_year,
-            "years_span": _calculate_year_span(data.baseline_year, data.base_year)
+            "years_span": _calculate_year_span(data.baseline_year, data.base_year),
         },
-        "reason": None
+        "reason": None,
     }
 
 
@@ -308,9 +315,9 @@ def compute_302_5_product_reduction(data: AIExtracted_GRI_302) -> Dict[str, Any]
         "unit": "MJ",
         "metadata": {
             "base_year": data.base_year,
-            "category": "Sold products and services"
+            "category": "Sold products and services",
         },
-        "reason": None
+        "reason": None,
     }
 
 

@@ -53,10 +53,26 @@ class ESGRepository:
                 "uploads": [],
                 "extractions": [],
                 "monthly_updates": [],
+                "evidence": [],
+                "submissions": [],
+                "latest_dashboard": {},
+                "latest_report": {},
                 "library": [],
                 "updated_at": self.utc_now_iso(),
             }
-        return companies[company_id]
+        record = companies[company_id]
+        record.setdefault("profile", {})
+        record.setdefault("onboarding", {})
+        record.setdefault("plan", {})
+        record.setdefault("uploads", [])
+        record.setdefault("extractions", [])
+        record.setdefault("monthly_updates", [])
+        record.setdefault("evidence", [])
+        record.setdefault("submissions", [])
+        record.setdefault("latest_dashboard", {})
+        record.setdefault("latest_report", {})
+        record.setdefault("library", [])
+        return record
 
     @staticmethod
     def utc_now_iso() -> str:
@@ -137,6 +153,98 @@ class ESGRepository:
         company_record["updated_at"] = self.utc_now_iso()
         self._save(data)
         return entry
+
+    def save_evidence_file(
+        self,
+        company_id: str,
+        evidence_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._load()
+        company_record = self._ensure_company_record(data, company_id)
+        company_record.setdefault("evidence", []).append(evidence_payload)
+        company_record["updated_at"] = self.utc_now_iso()
+        self._save(data)
+        return deepcopy(evidence_payload)
+
+    def get_evidence_files(self, company_id: str) -> list[dict[str, Any]]:
+        data = self._load()
+        record = data.get("companies", {}).get(company_id)
+        if not record:
+            return []
+        return deepcopy(record.get("evidence", []))
+
+    def get_evidence_file(self, company_id: str, file_id: str) -> dict[str, Any] | None:
+        evidence = self.get_evidence_files(company_id)
+        for item in evidence:
+            if item.get("file_id") == file_id:
+                return item
+        return None
+
+    def save_submission(
+        self,
+        company_id: str,
+        submission_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._load()
+        company_record = self._ensure_company_record(data, company_id)
+        company_record.setdefault("submissions", []).append(submission_payload)
+        company_record["updated_at"] = self.utc_now_iso()
+        self._save(data)
+        return deepcopy(submission_payload)
+
+    def get_latest_submission(self, company_id: str) -> dict[str, Any] | None:
+        data = self._load()
+        record = data.get("companies", {}).get(company_id)
+        if not record:
+            return None
+        submissions = record.get("submissions", [])
+        if not submissions:
+            return None
+        return deepcopy(submissions[-1])
+
+    def save_latest_dashboard(
+        self,
+        company_id: str,
+        dashboard_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._load()
+        company_record = self._ensure_company_record(data, company_id)
+        company_record["latest_dashboard"] = dashboard_payload
+        company_record["updated_at"] = self.utc_now_iso()
+        self._save(data)
+        return deepcopy(dashboard_payload)
+
+    def get_latest_dashboard(self, company_id: str) -> dict[str, Any] | None:
+        data = self._load()
+        record = data.get("companies", {}).get(company_id)
+        if not record:
+            return None
+        dashboard = record.get("latest_dashboard")
+        if not dashboard:
+            return None
+        return deepcopy(dashboard)
+
+    def save_latest_report(
+        self,
+        company_id: str,
+        report_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = self._load()
+        company_record = self._ensure_company_record(data, company_id)
+        company_record["latest_report"] = report_payload
+        company_record["updated_at"] = self.utc_now_iso()
+        self._save(data)
+        return deepcopy(report_payload)
+
+    def get_latest_report(self, company_id: str) -> dict[str, Any] | None:
+        data = self._load()
+        record = data.get("companies", {}).get(company_id)
+        if not record:
+            return None
+        report = record.get("latest_report")
+        if not report:
+            return None
+        return deepcopy(report)
 
     def get_library_entries(
         self, company_id: str, limit: int = 50

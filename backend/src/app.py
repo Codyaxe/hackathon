@@ -1,6 +1,8 @@
 import os
+import json
 from pathlib import Path
-from fastapi import Depends, FastAPI, File, Form, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from google import genai  # The new 2026 SDK
@@ -12,8 +14,10 @@ from src.dependencies.services import Services
 from src.dependencies.workflow_service import ESGWorkflowService
 from src.schemas.input_schemas import ExtractionPromptSchema
 from src.schemas.workflow_schemas import (
+    ESGReportResponse,
     ESGPlanRequest,
     ESGPlanResponse,
+    EvidenceListResponse,
     FileExtractionResponse,
     MonthlyUpdateQuestionsResponse,
     MonthlyUpdateResponse,
@@ -28,7 +32,7 @@ from src.schemas.workflow_schemas import (
 )
 
 from src.gris.gri_302_computations import GRI_302_FUNCTIONS
-from src.schemas.output_schemas import GRI_302_REQUIREMENTS
+from src.schemas.output_schemas import ExtractedData, GRI_302_REQUIREMENTS
 from src.gris.gri_305_computations import GRI_305_FUNCTIONS
 from src.schemas.output_schemas import GRI_305_REQUIREMENTS
 from src.gris.gri_401_computations import GRI_401_FUNCTIONS
@@ -74,7 +78,7 @@ async def get_esg_report(
     inputs: ExtractionPromptSchema, services: Services = Depends(Services)
 ) -> dict:
 
-    extracted_data = await services.ai_extract_data(inputs)
+    extracted_data: ExtractedData = await services.ai_extract_data(inputs)
 
     if extracted_data.detected_gri == "GRI_302":
         computations = services.GRI302Engine.run(extracted_data.data)
@@ -117,6 +121,11 @@ async def get_esg_report(
                 "summary": computations["summary"],
             },
         }
+
+    raise HTTPException(
+        status_code=422,
+        detail="Unsupported or undetected GRI standard in extracted payload.",
+    )
 
 
 @app.get("/test")
@@ -204,8 +213,81 @@ def get_monthly_update_questions(
 
 
 @app.post("/workflow/monthly-update/submit", response_model=MonthlyUpdateResponse)
-def submit_monthly_update(
+async def submit_monthly_update(
     submission: MonthlyUpdateSubmission,
     workflow: ESGWorkflowService = Depends(ESGWorkflowService),
 ) -> MonthlyUpdateResponse:
-    return workflow.submit_monthly_update(submission)
+    return await workflow.submit_monthly_update(submission)
+
+
+@app.post(
+    "/workflow/monthly-update/submit-with-files",
+    response_model=MonthlyUpdateResponse,
+)
+async def submit_monthly_update_with_files(
+    company_id: str = Form(...),
+    month: str = Form(...),
+    changes_json: str | None = Form(default=None),
+    notes: str | None = Form(default=None),
+    files: list[UploadFile] = File(...),
+    workflow: ESGWorkflowService = Depends(ESGWorkflowService),
+) -> MonthlyUpdateResponse:
+    try:
+        parsed_changes = json.loads(changes_json) if changes_json else {}
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="changes_json must be a valid JSON object string.",
+        ) from exc
+
+    submission = MonthlyUpdateSubmission(
+        company_id=company_id,
+        month=month,
+        changes=parsed_changes,
+        notes=notes,
+    )
+    return await workflow.submit_monthly_update_with_files(submission, files)
+
+
+@app.get("/evidence/{company_id}", response_model=EvidenceListResponse)
+def list_evidence(
+    company_id: str,
+    workflow: ESGWorkflowService = Depends(ESGWorkflowService),
+) -> EvidenceListResponse:
+    return workflow.list_evidence(company_id)
+
+
+@app.get("/evidence/{company_id}/{file_id}")
+def download_evidence(
+    company_id: str,
+    file_id: str,
+    workflow: ESGWorkflowService = Depends(ESGWorkflowService),
+) -> FileResponse:
+    file_path, metadata = workflow.resolve_evidence_file(company_id, file_id)
+    filename = metadata.get("filename") or file_id
+    media_type = metadata.get("media_type") or "application/octet-stream"
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type=media_type,
+    )
+
+
+@app.get("/workflow/report/{company_id}", response_model=ESGReportResponse)
+def get_workflow_report(
+    company_id: str,
+    workflow: ESGWorkflowService = Depends(ESGWorkflowService),
+) -> ESGReportResponse:
+    return workflow.get_esg_report(company_id)
+
+
+@app.get("/workflow/report/{company_id}/pdf")
+def download_workflow_report_pdf(
+    company_id: str,
+    workflow: ESGWorkflowService = Depends(ESGWorkflowService),
+) -> Response:
+    filename, pdf_bytes = workflow.get_esg_report_pdf(company_id)
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+    }
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)

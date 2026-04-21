@@ -2,15 +2,9 @@ from typing import Any, Callable, Dict, List
 
 from pydantic import BaseModel
 
-from src.gris.gri_302_computations import GRI_302_FUNCTIONS
-from src.schemas.output_schemas import AIExtracted_GRI_302, can_compute
-
-
-
 # ============================================================================
 # GRI 302 ENGINE
 # ============================================================================
-
 
 
 class GRIEngine:
@@ -30,9 +24,7 @@ class GRIEngine:
     """
 
     def __init__(
-        self,
-        functions: Dict[str, Callable],
-        requirements: Dict[str, List[str]]
+        self, functions: Dict[str, Callable], requirements: Dict[str, List[str]]
     ):
         """
         Initialize the GRIEngine.
@@ -101,15 +93,17 @@ class GRIEngine:
             if result["computed"]:
                 computed_count += 1
 
-        omitted = data.omitted_fields if data.omitted_fields else None
+        omitted_raw = getattr(data, "omitted_fields", None)
+        omitted = omitted_raw if omitted_raw else None
+        base_year = getattr(data, "base_year", None)
 
         results["summary"] = {
             "computed_count": computed_count,
             "total_count": len(self.functions),
             "availability": availability,
-            "base_year": data.base_year,
+            "base_year": base_year,
             "has_omitted_fields": bool(omitted),
-            "omitted_fields": omitted
+            "omitted_fields": omitted,
         }
 
         return results

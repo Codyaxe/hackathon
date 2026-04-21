@@ -1,15 +1,14 @@
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { FileText, FileInput, Download, FileBarChart, Sparkles } from 'lucide-react';
+import { FileText, FileInput, Zap, Sparkles } from 'lucide-react';
 import Card from '../ui/Card';
 import { useThemeStore } from '../../stores/themeStore';
 import type { QuickWinItem } from '../../types/workflow';
 
 const actions = [
   { icon: FileInput, label: 'Upload Data', description: 'Add energy, carbon, or waste records', path: '/data-input' },
-  { icon: FileText, label: 'Generate Plan', description: 'Create your one-page ESG action plan', path: '/reports' },
-  { icon: Download, label: 'Response Library', description: 'Reuse generated ESG responses', path: '/response-library' },
-  { icon: FileBarChart, label: 'Monthly Checkup', description: 'Submit this month\'s ESG changes', path: '/monthly-checkup' },
+  { icon: Zap, label: 'Generate One Plan', description: 'Create your one-page ESG action plan', path: '/one-plan' },
+  { icon: FileText, label: 'Open ESG Report', description: 'View GRI disclosures and download PDF', path: '/reports' },
 ];
 
 interface QuickActionsProps {
@@ -73,7 +72,14 @@ export default function QuickActions({ quickWins = [], isLoading = false }: Quic
                 key={item.title}
                 className={`rounded-lg p-3 ${isDark ? 'bg-white/5' : 'bg-[#f4f6f9]'}`}
               >
-                <p className={`text-sm font-medium ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>{item.title}</p>
+                <div className="flex items-start justify-between mb-1">
+                  <p className={`text-sm font-medium ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>{item.title}</p>
+                  {item.estimated_cost_savings_php && (
+                    <span className="text-xs font-semibold" style={{ color: '#2d9e6b' }}>
+                      ₱{item.estimated_cost_savings_php.toLocaleString()}
+                    </span>
+                  )}
+                </div>
                 <p className={`text-xs mt-1 ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>{item.first_step}</p>
               </div>
             ))}

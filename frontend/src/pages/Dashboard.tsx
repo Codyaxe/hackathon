@@ -7,7 +7,7 @@ import QuickActions from '../components/dashboard/QuickActions';
 import EnergyLineChart from '../components/charts/EnergyLineChart';
 import CarbonBarChart from '../components/charts/CarbonBarChart';
 import WasteDonutChart from '../components/charts/WasteDonutChart';
-import { energyData, carbonData, totalEnergy, totalCarbon, recyclingRate } from '../data/mock/esg-data';
+import { energyData, carbonData } from '../data/mock/esg-data';
 import type { ScoreCard } from '../types/esg';
 import { useThemeStore } from '../stores/themeStore';
 import { getStoredCompanyProfile } from '../lib/companyProfile';
@@ -96,13 +96,14 @@ export default function Dashboard() {
   const recentFiles = useMemo(() => parseRecentFiles(libraryEntries), [libraryEntries]);
   const completion = progress?.completion_percentage ?? 0;
   const hasCompletedOnboarding = progress?.steps.find((step) => step.step_id === 'onboarding')?.completed ?? false;
-  const esgScore = Math.round(completion);
+  
+  // Build metrics from real ESG data
+  const esgScore = progress?.esg_score ?? Math.round(completion);
   const esgScoreLabel: ScoreCard['score'] = esgScore >= 85 ? 'excellent' : esgScore >= 70 ? 'good' : esgScore >= 50 ? 'fair' : 'poor';
+  const complianceStatus = progress?.compliance_status ?? 'Needs Attention';
+  const complianceScore: ScoreCard['score'] = complianceStatus === 'On Track' ? 'excellent' : 'fair';
 
   const metrics: ScoreCard[] = [
-    { label: 'Total Energy', value: totalEnergy.toLocaleString(), unit: 'kWh', score: 'good', trend: 'down', change: -8.2 },
-    { label: 'Carbon Footprint', value: totalCarbon.toFixed(0), unit: 't CO₂e', score: 'fair', trend: 'down', change: -5.4 },
-    { label: 'Recycling Rate', value: recyclingRate.toFixed(1), unit: '%', score: 'excellent', trend: 'up', change: 12.3 },
     {
       label: 'ESG Score',
       value: esgScore,
@@ -110,6 +111,14 @@ export default function Dashboard() {
       score: esgScoreLabel,
       trend: 'up',
       change: completion,
+    },
+    {
+      label: 'Compliance Status',
+      value: complianceStatus,
+      unit: '',
+      score: complianceScore,
+      trend: complianceStatus === 'On Track' ? 'up' : 'down',
+      change: 0,
     },
   ];
 
@@ -136,6 +145,46 @@ export default function Dashboard() {
             <MetricCard key={metric.label} data={metric} delay={0.2 + index * 0.1} />
           ))}
         </div>
+
+        {/* KPIs Grid */}
+        {progress?.kpis && progress.kpis.length > 0 && (
+          <div className="space-y-3">
+            <h2 className={`text-lg font-display font-semibold ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>
+              Key Performance Indicators
+            </h2>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {progress.kpis.map((kpi, index) => {
+                const ratingColor = kpi.rating === 'Best' ? '#2d9e6b' : kpi.rating === 'Better' ? '#2D6A4F' : '#D4A574';
+                return (
+                  <motion.div
+                    key={kpi.name}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, delay: 0.4 + index * 0.1 }}
+                    whileHover={{ y: -4 }}
+                    className={`rounded-xl shadow-sm p-4 transition-shadow duration-300 hover:shadow-md ${
+                      isDark ? 'bg-[#111e33] border border-white/[0.08]' : 'bg-white border border-[#e2e8f0]'
+                    }`}
+                  >
+                    <p className={`text-sm font-medium mb-2 ${isDark ? 'text-white/70' : 'text-[#6b7c93]'}`}>
+                      {kpi.name}
+                    </p>
+                    <p className="text-2xl font-display font-semibold mb-2" style={{ color: ratingColor }}>
+                      {kpi.value}
+                      {kpi.unit && <span className="text-sm ml-1">{kpi.unit}</span>}
+                    </p>
+                    <span
+                      className="text-xs font-semibold px-2 py-1 rounded-full"
+                      style={{ color: ratingColor, backgroundColor: `${ratingColor}15` }}
+                    >
+                      {kpi.rating}
+                    </span>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Charts Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

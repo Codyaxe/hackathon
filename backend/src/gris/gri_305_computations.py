@@ -28,7 +28,10 @@ from src.schemas.output_schemas import can_compute
 # HELPER FUNCTIONS
 # ============================================================================
 
-def _calculate_year_span(baseline_year: Optional[str], reporting_year: Optional[str]) -> Optional[int]:
+
+def _calculate_year_span(
+    baseline_year: Optional[str], reporting_year: Optional[str]
+) -> Optional[int]:
     if baseline_year is None or reporting_year is None:
         return None
     try:
@@ -39,8 +42,7 @@ def _calculate_year_span(baseline_year: Optional[str], reporting_year: Optional[
 
 def _get_missing_fields(data: AIExtracted_GRI_305, substandard: str) -> list[str]:
     return [
-        f for f in GRI_305_REQUIREMENTS[substandard]
-        if getattr(data, f, None) is None
+        f for f in GRI_305_REQUIREMENTS[substandard] if getattr(data, f, None) is None
     ]
 
 
@@ -50,13 +52,14 @@ def _not_computed(missing_fields: list[str], unit: str) -> Dict[str, Any]:
         "value": None,
         "unit": unit,
         "metadata": {},
-        "reason": f"Missing required fields: {', '.join(missing_fields)}"
+        "reason": f"Missing required fields: {', '.join(missing_fields)}",
     }
 
 
 # ============================================================================
 # COMPUTATION FUNCTIONS FOR EACH GRI 305 SUB-STANDARD
 # ============================================================================
+
 
 def compute_305_1_scope1(data: AIExtracted_GRI_305) -> Dict[str, Any]:
     """
@@ -69,29 +72,36 @@ def compute_305_1_scope1(data: AIExtracted_GRI_305) -> Dict[str, Any]:
         return _not_computed(_get_missing_fields(data, "305_1"), "kg CO2e")
 
     biogenic_kg = data.scope1_biogenic_kg_co2 or 0.0
-    non_biogenic = data.scope1_total_kg_co2e - biogenic_kg
+    scope1_total = data.scope1_total_kg_co2e or 0.0
+    non_biogenic = scope1_total - biogenic_kg
 
-    ghg_gases = list({
-        gas
-        for entry in data.scope1_entries
-        for gas in entry.ghg_gases_included
-    }) if data.scope1_entries else []
+    ghg_gases = (
+        list({gas for entry in data.scope1_entries for gas in entry.ghg_gases_included})
+        if data.scope1_entries
+        else []
+    )
 
     return {
         "computed": True,
         "value": {
-            "total_kg_co2e": data.scope1_total_kg_co2e,
+            "total_kg_co2e": scope1_total,
             "biogenic_kg_co2": biogenic_kg,
             "non_biogenic_kg_co2e": non_biogenic,
         },
         "unit": "kg CO2e",
         "metadata": {
             "base_year": data.base_year,
-            "emission_entries_count": len(data.scope1_entries) if data.scope1_entries else 0,
+            "emission_entries_count": (
+                len(data.scope1_entries) if data.scope1_entries else 0
+            ),
             "ghg_gases_included": ghg_gases,
-            "emission_factor_source": data.emission_factor_metadata.source if data.emission_factor_metadata else None,
+            "emission_factor_source": (
+                data.emission_factor_metadata.source
+                if data.emission_factor_metadata
+                else None
+            ),
         },
-        "reason": None
+        "reason": None,
     }
 
 
@@ -106,34 +116,38 @@ def compute_305_2_scope2(data: AIExtracted_GRI_305) -> Dict[str, Any]:
 
     biogenic_kg = data.scope2_biogenic_kg_co2 or 0.0
 
-    ghg_gases = list({
-        gas
-        for entry in data.scope2_entries
-        for gas in entry.ghg_gases_included
-    }) if data.scope2_entries else []
+    ghg_gases = (
+        list({gas for entry in data.scope2_entries for gas in entry.ghg_gases_included})
+        if data.scope2_entries
+        else []
+    )
 
     return {
         "computed": True,
         "value": {
             "location_based_kg_co2e": data.scope2_location_based_kg_co2e,
-            "market_based_kg_co2e": data.scope2_market_based_kg_co2e,   # None if not reported
+            "market_based_kg_co2e": data.scope2_market_based_kg_co2e,  # None if not reported
             "biogenic_kg_co2": biogenic_kg,
         },
         "unit": "kg CO2e",
         "metadata": {
             "base_year": data.base_year,
-            "emission_entries_count": len(data.scope2_entries) if data.scope2_entries else 0,
+            "emission_entries_count": (
+                len(data.scope2_entries) if data.scope2_entries else 0
+            ),
             "ghg_gases_included": ghg_gases,
             "calculation_methodology": (
                 data.emission_factor_metadata.calculation_methodology
-                if data.emission_factor_metadata else None
+                if data.emission_factor_metadata
+                else None
             ),
             "emission_factor_source": (
                 data.emission_factor_metadata.source
-                if data.emission_factor_metadata else None
+                if data.emission_factor_metadata
+                else None
             ),
         },
-        "reason": None
+        "reason": None,
     }
 
 
@@ -160,10 +174,11 @@ def compute_305_3_scope3(data: AIExtracted_GRI_305) -> Dict[str, Any]:
             "categories_included": data.scope3_categories_included,
             "emission_factor_source": (
                 data.emission_factor_metadata.source
-                if data.emission_factor_metadata else None
+                if data.emission_factor_metadata
+                else None
             ),
         },
-        "reason": None
+        "reason": None,
     }
 
 
@@ -178,7 +193,9 @@ def compute_305_4_intensity(data: AIExtracted_GRI_305) -> Dict[str, Any]:
         return _not_computed(_get_missing_fields(data, "305_4"), "kg CO2e")
 
     # Total emissions = Scope 1 + Scope 2 (location-based)
-    total_emissions = (data.scope1_total_kg_co2e or 0.0) + (data.scope2_location_based_kg_co2e or 0.0)
+    total_emissions = (data.scope1_total_kg_co2e or 0.0) + (
+        data.scope2_location_based_kg_co2e or 0.0
+    )
 
     # Determine denominator — prefer employee count
     if data.employee_count is not None and data.employee_count > 0:
@@ -204,7 +221,7 @@ def compute_305_4_intensity(data: AIExtracted_GRI_305) -> Dict[str, Any]:
             "value": None,
             "unit": "kg CO2e",
             "metadata": {},
-            "reason": f"Missing denominator fields: {', '.join(missing)}"
+            "reason": f"Missing denominator fields: {', '.join(missing)}",
         }
 
     return {
@@ -219,7 +236,7 @@ def compute_305_4_intensity(data: AIExtracted_GRI_305) -> Dict[str, Any]:
             "scopes_included": data.intensity_scopes_included,
             "specified_denominator": data.intensity_denominator,
         },
-        "reason": None
+        "reason": None,
     }
 
 
@@ -237,21 +254,25 @@ def compute_305_5_reduction(data: AIExtracted_GRI_305) -> Dict[str, Any]:
     baseline_emissions = None
 
     # Only compute percentage if we have current emissions to compare against
-    current_emissions = (data.scope1_total_kg_co2e or 0.0) + (data.scope2_location_based_kg_co2e or 0.0)
+    current_emissions = (data.scope1_total_kg_co2e or 0.0) + (
+        data.scope2_location_based_kg_co2e or 0.0
+    )
+    reduction_kg = data.ghg_reduction_kg_co2e or 0.0
     if current_emissions > 0:
-        baseline_emissions = current_emissions + data.ghg_reduction_kg_co2e
+        baseline_emissions = current_emissions + reduction_kg
         reduction_percentage = (
-            (data.ghg_reduction_kg_co2e / baseline_emissions) * 100
-            if baseline_emissions > 0 else 0.0
+            (reduction_kg / baseline_emissions) * 100 if baseline_emissions > 0 else 0.0
         )
 
     return {
         "computed": True,
         "value": {
-            "reduction_kg_co2e": data.ghg_reduction_kg_co2e,
-            "reduction_percentage": reduction_percentage,       # None if current emissions unavailable
+            "reduction_kg_co2e": reduction_kg,
+            "reduction_percentage": reduction_percentage,  # None if current emissions unavailable
             "baseline_emissions_kg_co2e": baseline_emissions,  # None if not computable
-            "current_emissions_kg_co2e": current_emissions if current_emissions > 0 else None,
+            "current_emissions_kg_co2e": (
+                current_emissions if current_emissions > 0 else None
+            ),
         },
         "unit": "kg CO2e",
         "metadata": {
@@ -260,7 +281,7 @@ def compute_305_5_reduction(data: AIExtracted_GRI_305) -> Dict[str, Any]:
             "years_span": _calculate_year_span(data.baseline_year, data.base_year),
             "scopes_included": data.reduction_scopes_included,
         },
-        "reason": None
+        "reason": None,
     }
 
 
@@ -281,7 +302,7 @@ def compute_305_6_ods(data: AIExtracted_GRI_305) -> Dict[str, Any]:
             "base_year": data.base_year,
             "substances_reported": data.ods_substances,
         },
-        "reason": None
+        "reason": None,
     }
 
 
@@ -299,14 +320,14 @@ def compute_305_7_air_emissions(data: AIExtracted_GRI_305) -> Dict[str, Any]:
         "value": {
             "nox_kg": data.nox_kg,
             "sox_kg": data.sox_kg,
-            "voc_kg": data.voc_kg,   # None if not reported
-            "pm_kg": data.pm_kg,     # None if not reported
+            "voc_kg": data.voc_kg,  # None if not reported
+            "pm_kg": data.pm_kg,  # None if not reported
         },
         "unit": "kg",
         "metadata": {
             "base_year": data.base_year,
         },
-        "reason": None
+        "reason": None,
     }
 
 

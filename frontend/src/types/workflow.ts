@@ -17,6 +17,7 @@ export interface OnboardingQuizContext {
   employee_count: number;
   annual_revenue?: number;
   primary_country?: string;
+  location?: string;
 }
 
 export interface WorkflowQuestion {
@@ -72,6 +73,8 @@ export interface ESGPlanResponse {
   priority_themes: string[];
   actions: ESGPlanAction[];
   monthly_check_in_questions: string[];
+  kpis: string[];
+  ready_for_pdf: boolean;
 }
 
 export interface ExtractedMetric {
@@ -97,6 +100,17 @@ export interface FileExtractionResponse {
   extracted_metrics: ExtractedMetric[];
   ai_summary: string;
   follow_up_questions: string[];
+  fixed_extraction?: FixedExtractionMetrics | null;
+}
+
+export interface FixedExtractionMetrics {
+  electricity_kwh?: number | null;
+  diesel_liters?: number | null;
+  waste_kg?: number | null;
+  headcount?: number | null;
+  new_hires?: number | null;
+  turnover_count?: number | null;
+  missing_fields: string[];
 }
 
 export interface ResponseLibraryEntry {
@@ -125,6 +139,17 @@ export interface ProgressTrackerResponse {
   maturity_stage: "getting_started" | "building_baseline" | "improving" | "advanced";
   steps: ProgressStep[];
   next_best_actions: string[];
+  esg_score: number;
+  compliance_status: "On Track" | "Needs Attention";
+  kpis: DashboardKPI[];
+  quick_wins_with_savings: QuickWinItem[];
+}
+
+export interface DashboardKPI {
+  name: string;
+  value: number | string;
+  unit?: string | null;
+  rating: "Good" | "Better" | "Best";
 }
 
 export interface QuickWinItem {
@@ -134,6 +159,7 @@ export interface QuickWinItem {
   expected_benefit: string;
   why_recommended: string;
   first_step: string;
+  estimated_cost_savings_php?: number | null;
 }
 
 export interface QuickWinsResponse {
@@ -171,4 +197,43 @@ export interface MonthlyUpdateResponse {
   change_summary: string[];
   updated_focus_areas: FocusArea[];
   recommended_next_actions: string[];
+  submission_id?: string | null;
+  pipeline_refreshed?: boolean;
+  updated_plan_ready_for_pdf?: boolean;
+}
+
+export interface EvidenceFileRecord {
+  file_id: string;
+  filename: string;
+  media_type: string;
+  size_bytes: number;
+  uploaded_at: string;
+  disclosure_tag?: string | null;
+}
+
+export interface EvidenceListResponse {
+  company_id: string;
+  evidence_files: EvidenceFileRecord[];
+}
+
+export interface ESGReportDisclosure {
+  disclosure: string;
+  title: string;
+  computed: boolean;
+  value?: unknown;
+  unit?: string | null;
+  reason_for_omission?: string | null;
+}
+
+export interface OmissionReason {
+  disclosure: string;
+  reason: string;
+}
+
+export interface ESGReportResponse {
+  company_id: string;
+  generated_at: string;
+  disclosures: ESGReportDisclosure[];
+  reasons_for_omission: OmissionReason[];
+  source_submission_id?: string | null;
 }

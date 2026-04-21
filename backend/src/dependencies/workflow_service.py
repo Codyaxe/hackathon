@@ -3,25 +3,48 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import re
-from typing import Any, Literal, cast
+from typing import Any, Literal, Sequence, cast
 from uuid import uuid4
 
 from fastapi import HTTPException, Request, UploadFile
 from google.genai import types
 
 from src.dependencies.repository import ESGRepository
+from src.schemas.MetricsSchemas.GRI_302_Metrics import (
+    ConversionFactors,
+    EnergyEntry,
+    Omission302,
+)
+from src.schemas.MetricsSchemas.GRI_305_Metrics import (
+    EmissionEntry,
+    EmissionFactorMetadata,
+    Omission305,
+)
+from src.schemas.MetricsSchemas.GRI_401_Metrics import Omission401
+from src.schemas.output_schemas import (
+    AIExtracted_GRI_302,
+    AIExtracted_GRI_305,
+    AIExtracted_GRI_401,
+)
 from src.schemas.workflow_schemas import (
     AIFileExtractionResult,
+    DashboardKPI,
+    ESGReportDisclosure,
+    ESGReportResponse,
     ESGPlanAction,
     ESGPlanRequest,
     ESGPlanResponse,
+    EvidenceFileRecord,
+    EvidenceListResponse,
     ExtractedMetric,
     FileExtractionResponse,
+    FixedExtractionMetrics,
     FocusArea,
     MonthlyUpdateQuestion,
     MonthlyUpdateQuestionsResponse,
     MonthlyUpdateResponse,
     MonthlyUpdateSubmission,
+    OmissionReason,
     OnboardingQuizResponse,
     OnboardingQuizSubmission,
     OnboardingRecommendationResponse,
@@ -64,14 +87,21 @@ class ESGWorkflowService:
     }
 
     def __init__(self, request: Request):
+        self.request = request
         self.ai = request.app.state.ai
         self.repo = ESGRepository(Path(request.app.state.workflow_storage_path))
+        self.GRI302Engine = request.app.state.GRI302Engine
+        self.GRI305Engine = request.app.state.GRI305Engine
+        self.GRI401Engine = request.app.state.GRI401Engine
+        self.evidence_root = (
+            Path(request.app.state.workflow_storage_path).parent / "evidence"
+        )
+        self.evidence_root.mkdir(parents=True, exist_ok=True)
 
     def get_onboarding_quiz(self, context) -> OnboardingQuizResponse:
         questions = self._build_onboarding_questions(
             context.industry, context.employee_count
         )
-        self.repo.save_profile(context.company_id, context.model_dump(mode="json"))
         return OnboardingQuizResponse(context=context, questions=questions)
 
     async def submit_onboarding(
@@ -183,6 +213,11 @@ class ESGWorkflowService:
             "What one low-effort improvement can you complete next month?",
         ]
 
+        latest_submission = self.repo.get_latest_submission(plan_request.company_id)
+        latest_report = self.repo.get_latest_report(plan_request.company_id)
+        kpis = self._kpi_labels_from_submission(latest_submission)
+        ready_for_pdf = bool(latest_report and latest_report.get("disclosures"))
+
         plan_response = ESGPlanResponse(
             company_id=plan_request.company_id,
             generated_at=datetime.now(timezone.utc),
@@ -190,6 +225,8 @@ class ESGWorkflowService:
             priority_themes=selected_themes,
             actions=actions,
             monthly_check_in_questions=monthly_questions,
+            kpis=kpis,
+            ready_for_pdf=ready_for_pdf,
         )
 
         plan_payload = plan_response.model_dump(mode="json")
@@ -209,6 +246,8 @@ class ESGWorkflowService:
                 status_code=400, detail="At least one file is required."
             )
 
+        company_data = self.repo.get_company_data(company_id) or {}
+
         file_parts: list[types.Part] = [
             types.Part.from_text(
                 text=(
@@ -221,6 +260,7 @@ class ESGWorkflowService:
             file_parts.append(types.Part.from_text(text=f"User notes: {notes}"))
 
         upload_records: list[UploadedFileRecord] = []
+        evidence_records: list[dict[str, Any]] = []
 
         for upload in files:
             binary = await upload.read()
@@ -243,8 +283,28 @@ class ESGWorkflowService:
                 media_type=media_type,
                 size_bytes=len(binary),
                 uploaded_at=datetime.now(timezone.utc),
+                disclosure_tag=self._infer_disclosure_tag(upload.filename or "", notes),
             )
             upload_records.append(record)
+
+            storage_path = self._save_evidence_bytes(
+                company_id=company_id,
+                file_id=record.file_id,
+                binary=binary,
+            )
+            evidence_payload = {
+                **EvidenceFileRecord(
+                    file_id=record.file_id,
+                    filename=record.filename,
+                    media_type=record.media_type,
+                    size_bytes=record.size_bytes,
+                    uploaded_at=record.uploaded_at,
+                    disclosure_tag=record.disclosure_tag,
+                ).model_dump(mode="json"),
+                "storage_path": storage_path,
+            }
+            self.repo.save_evidence_file(company_id, evidence_payload)
+            evidence_records.append(evidence_payload)
 
             if media_type in {"text/csv", "text/plain"}:
                 text_preview = binary.decode("utf-8", errors="ignore")[:20000]
@@ -264,12 +324,29 @@ class ESGWorkflowService:
             )
 
         extraction = await self._extract_metrics_with_ai(file_parts, upload_records)
+        fixed_extraction = await self._extract_fixed_metrics_with_ai(
+            file_parts=file_parts,
+            fallback_headcount=company_data.get("profile", {}).get("employee_count"),
+        )
+
+        pipeline_submission = self._run_submission_pipeline(
+            company_id=company_id,
+            company_data=company_data,
+            fixed_extraction=fixed_extraction,
+            source="upload",
+            month=None,
+            changes=None,
+            notes=notes,
+            evidence_records=evidence_records,
+        )
+
         response = FileExtractionResponse(
             company_id=company_id,
             files=upload_records,
             extracted_metrics=extraction.metrics,
             ai_summary=extraction.summary,
             follow_up_questions=extraction.follow_up_questions,
+            fixed_extraction=fixed_extraction,
         )
 
         response_payload = response.model_dump(mode="json")
@@ -280,6 +357,7 @@ class ESGWorkflowService:
             ],
             extraction_payload=response_payload,
         )
+        response_payload["submission_id"] = pipeline_submission.get("submission_id")
         self.repo.append_library_entry(
             company_id, "upload_extraction", response_payload
         )
@@ -292,6 +370,98 @@ class ESGWorkflowService:
         entries_raw = self.repo.get_library_entries(company_id, limit=limit)
         entries = [ResponseLibraryEntry.model_validate(item) for item in entries_raw]
         return ResponseLibraryResponse(company_id=company_id, entries=entries)
+
+    def list_evidence(self, company_id: str) -> EvidenceListResponse:
+        company_data = self.repo.get_company_data(company_id)
+        if not company_data:
+            raise HTTPException(
+                status_code=404, detail="Company not found. Complete onboarding first."
+            )
+
+        evidence_files: list[EvidenceFileRecord] = []
+        for item in self.repo.get_evidence_files(company_id):
+            evidence_files.append(EvidenceFileRecord.model_validate(item))
+
+        return EvidenceListResponse(
+            company_id=company_id, evidence_files=evidence_files
+        )
+
+    def resolve_evidence_file(
+        self, company_id: str, file_id: str
+    ) -> tuple[Path, dict[str, Any]]:
+        metadata = self.repo.get_evidence_file(company_id, file_id)
+        if not metadata:
+            raise HTTPException(status_code=404, detail="Evidence file not found.")
+
+        raw_path = metadata.get("storage_path")
+        if not raw_path:
+            raise HTTPException(
+                status_code=404, detail="Evidence storage path is missing."
+            )
+
+        file_path = Path(raw_path)
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(
+                status_code=404, detail="Evidence file content is unavailable."
+            )
+
+        return file_path, metadata
+
+    def get_esg_report(self, company_id: str) -> ESGReportResponse:
+        company_data = self.repo.get_company_data(company_id)
+        if not company_data:
+            raise HTTPException(
+                status_code=404, detail="Company not found. Complete onboarding first."
+            )
+
+        latest_report = self.repo.get_latest_report(company_id)
+        if latest_report:
+            return ESGReportResponse.model_validate(latest_report)
+
+        latest_submission = self.repo.get_latest_submission(company_id)
+        if not latest_submission:
+            raise HTTPException(
+                status_code=404,
+                detail="No submission data found yet. Upload evidence or run monthly checkup first.",
+            )
+
+        report_payload = self._build_report_payload(company_id, latest_submission)
+        self.repo.save_latest_report(company_id, report_payload)
+        return ESGReportResponse.model_validate(report_payload)
+
+    def get_esg_report_pdf(self, company_id: str) -> tuple[str, bytes]:
+        report = self.get_esg_report(company_id)
+        company_data = self.repo.get_company_data(company_id) or {}
+        profile = company_data.get("profile", {})
+
+        lines: list[str] = [
+            f"ESG Report - {profile.get('company_name', company_id)}",
+            f"Industry: {profile.get('industry', 'Unknown')}",
+            f"Location: {profile.get('location', 'Unknown')}",
+            f"Generated at: {report.generated_at.isoformat()}",
+            "",
+            "GRI Disclosures",
+        ]
+
+        for disclosure in report.disclosures:
+            if disclosure.computed:
+                lines.append(
+                    f"{disclosure.disclosure} {disclosure.title}: {self._stringify_report_value(disclosure.value)} {disclosure.unit or ''}".strip()
+                )
+            else:
+                lines.append(
+                    f"{disclosure.disclosure} {disclosure.title}: OMITTED - {disclosure.reason_for_omission or 'Not enough data.'}"
+                )
+
+        if report.reasons_for_omission:
+            lines.append("")
+            lines.append("Reasons for Omission")
+            for omission in report.reasons_for_omission:
+                lines.append(f"{omission.disclosure}: {omission.reason}")
+
+        pdf_bytes = self._build_simple_pdf(lines)
+        filename = f"{company_id}-esg-report-{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+        return filename, pdf_bytes
 
     def get_progress(self, company_id: str) -> ProgressTrackerResponse:
         company_data = self.repo.get_company_data(company_id)
@@ -367,12 +537,42 @@ class ESGWorkflowService:
             :3
         ]
 
+        dashboard_snapshot = self.repo.get_latest_dashboard(company_id) or {}
+        kpis: list[DashboardKPI] = [
+            DashboardKPI.model_validate(item)
+            for item in dashboard_snapshot.get("kpis", [])
+        ]
+        esg_score = self._to_float(dashboard_snapshot.get("esg_score"))
+        if esg_score is None:
+            esg_score = completion
+        compliance_status = str(
+            dashboard_snapshot.get("compliance_status", "Needs Attention")
+        )
+        if compliance_status not in {"On Track", "Needs Attention"}:
+            compliance_status = "Needs Attention"
+
+        onboarding = company_data.get("onboarding", {})
+        focus_areas = [
+            item.get("area", "") for item in onboarding.get("focus_areas", [])
+        ]
+        if not focus_areas:
+            focus_areas = self._default_focus_by_industry(
+                company_data.get("profile", {}).get("industry", "")
+            )
+        quick_wins = self._build_quick_wins(focus_areas)
+
         return ProgressTrackerResponse(
             company_id=company_id,
             completion_percentage=completion,
             maturity_stage=maturity,
             steps=steps,
             next_best_actions=next_actions,
+            esg_score=esg_score,
+            compliance_status=cast(
+                Literal["On Track", "Needs Attention"], compliance_status
+            ),
+            kpis=kpis,
+            quick_wins_with_savings=quick_wins,
         )
 
     def get_quick_wins(self, company_id: str) -> QuickWinsResponse:
@@ -390,76 +590,7 @@ class ESGWorkflowService:
             focus_areas = self._default_focus_by_industry(
                 company_data.get("profile", {}).get("industry", "")
             )
-
-        suggestions_by_area = {
-            "energy": QuickWinItem(
-                title="Track energy from last 3 utility bills",
-                impact_area="energy",
-                effort="low",
-                expected_benefit="Find immediate savings opportunities and establish baseline usage.",
-                why_recommended="Energy tracking is usually the fastest way for SMEs to see measurable ESG progress.",
-                first_step="Create one monthly sheet with kWh and cost by facility.",
-            ),
-            "emissions": QuickWinItem(
-                title="Estimate Scope 1 + 2 using existing bills",
-                impact_area="emissions",
-                effort="low",
-                expected_benefit="Create your first carbon snapshot without complex tooling.",
-                why_recommended="You already have enough data from fuel and electricity documents.",
-                first_step="Map electricity and fuel totals to a simple emissions calculator.",
-            ),
-            "waste": QuickWinItem(
-                title="Run a one-week waste separation trial",
-                impact_area="waste",
-                effort="low",
-                expected_benefit="Cut landfill waste quickly and improve recycling rates.",
-                why_recommended="Small process changes often deliver visible waste improvements in under a month.",
-                first_step="Label waste streams and record weekly weights by category.",
-            ),
-            "workforce": QuickWinItem(
-                title="Start a monthly workforce wellbeing pulse",
-                impact_area="workforce",
-                effort="low",
-                expected_benefit="Spot retention and safety risks early with lightweight tracking.",
-                why_recommended="People metrics are often under-tracked but highly impactful for ESG maturity.",
-                first_step="Use a 5-question anonymous survey and monitor trend lines.",
-            ),
-            "governance": QuickWinItem(
-                title="Assign ESG ownership and a 30-minute monthly review",
-                impact_area="governance",
-                effort="low",
-                expected_benefit="Turns ESG from ad-hoc efforts into repeatable execution.",
-                why_recommended="Clear ownership is the single biggest predictor of sustained progress.",
-                first_step="Nominate one owner and create a recurring review meeting.",
-            ),
-            "data_foundation": QuickWinItem(
-                title="Build one shared ESG data template",
-                impact_area="data_foundation",
-                effort="low",
-                expected_benefit="Avoid rework and make monthly updates take minutes, not hours.",
-                why_recommended="A clean data template removes the biggest SME ESG bottleneck.",
-                first_step="Define core fields for energy, emissions, waste, and headcount.",
-            ),
-            "supply_chain": QuickWinItem(
-                title="Collect top-5 supplier sustainability details",
-                impact_area="supply_chain",
-                effort="medium",
-                expected_benefit="Improve procurement risk visibility and customer trust.",
-                why_recommended="Most SMEs can start supply chain ESG with a small supplier subset.",
-                first_step="Request environmental and labor policy docs from your largest suppliers.",
-            ),
-        }
-
-        quick_wins: list[QuickWinItem] = []
-        for area in focus_areas:
-            item = suggestions_by_area.get(area)
-            if item and item.title not in {win.title for win in quick_wins}:
-                quick_wins.append(item)
-            if len(quick_wins) >= 5:
-                break
-
-        if not quick_wins:
-            quick_wins.append(suggestions_by_area["data_foundation"])
+        quick_wins = self._build_quick_wins(focus_areas)
 
         return QuickWinsResponse(
             company_id=company_id,
@@ -534,7 +665,7 @@ class ESGWorkflowService:
             questions=questions,
         )
 
-    def submit_monthly_update(
+    async def submit_monthly_update(
         self, submission: MonthlyUpdateSubmission
     ) -> MonthlyUpdateResponse:
         self._validate_month(submission.month)
@@ -571,6 +702,29 @@ class ESGWorkflowService:
             "submitted_at": self._utc_now_iso(),
         }
 
+        fixed_extraction = self._fixed_metrics_from_changes(
+            changes=submission.changes,
+            fallback_headcount=company_data.get("profile", {}).get("employee_count"),
+        )
+        pipeline_submission = self._run_submission_pipeline(
+            company_id=submission.company_id,
+            company_data=company_data,
+            fixed_extraction=fixed_extraction,
+            source="monthly_update",
+            month=submission.month,
+            changes=submission.changes,
+            notes=submission.notes,
+            evidence_records=[],
+        )
+
+        plan_ready_for_pdf = False
+        if company_data.get("plan"):
+            refreshed_plan = await self._refresh_plan_from_latest_pipeline(
+                company_id=submission.company_id,
+                company_data=company_data,
+            )
+            plan_ready_for_pdf = bool(refreshed_plan.get("ready_for_pdf", False))
+
         self.repo.save_monthly_update(submission.company_id, payload)
         self.repo.append_library_entry(submission.company_id, "monthly_update", payload)
 
@@ -580,7 +734,22 @@ class ESGWorkflowService:
             change_summary=summary,
             updated_focus_areas=updated_focus,
             recommended_next_actions=recommended_next_actions,
+            submission_id=pipeline_submission.get("submission_id"),
+            pipeline_refreshed=True,
+            updated_plan_ready_for_pdf=plan_ready_for_pdf,
         )
+
+    async def submit_monthly_update_with_files(
+        self,
+        submission: MonthlyUpdateSubmission,
+        files: list[UploadFile],
+    ) -> MonthlyUpdateResponse:
+        await self.upload_files(
+            company_id=submission.company_id,
+            files=files,
+            notes=submission.notes,
+        )
+        return await self.submit_monthly_update(submission)
 
     def _build_onboarding_questions(
         self, industry: str, employee_count: int
@@ -1186,6 +1355,961 @@ class ESGWorkflowService:
             actions.append("Maintain current ESG cadence and continue monthly updates.")
 
         return actions[:3]
+
+    def _build_quick_wins(self, focus_areas: Sequence[str]) -> list[QuickWinItem]:
+        suggestions_by_area = {
+            "energy": QuickWinItem(
+                title="Track energy from last 3 utility bills",
+                impact_area="energy",
+                effort="low",
+                expected_benefit="Find immediate savings opportunities and establish baseline usage.",
+                why_recommended="Energy tracking is usually the fastest way for SMEs to see measurable ESG progress.",
+                first_step="Create one monthly sheet with kWh and cost by facility.",
+                estimated_cost_savings_php=18000,
+            ),
+            "emissions": QuickWinItem(
+                title="Estimate Scope 1 + 2 using existing bills",
+                impact_area="emissions",
+                effort="low",
+                expected_benefit="Create your first carbon snapshot without complex tooling.",
+                why_recommended="You already have enough data from fuel and electricity documents.",
+                first_step="Map electricity and fuel totals to a simple emissions calculator.",
+                estimated_cost_savings_php=12000,
+            ),
+            "waste": QuickWinItem(
+                title="Run a one-week waste separation trial",
+                impact_area="waste",
+                effort="low",
+                expected_benefit="Cut landfill waste quickly and improve recycling rates.",
+                why_recommended="Small process changes often deliver visible waste improvements in under a month.",
+                first_step="Label waste streams and record weekly weights by category.",
+                estimated_cost_savings_php=9000,
+            ),
+            "workforce": QuickWinItem(
+                title="Start a monthly workforce wellbeing pulse",
+                impact_area="workforce",
+                effort="low",
+                expected_benefit="Spot retention and safety risks early with lightweight tracking.",
+                why_recommended="People metrics are often under-tracked but highly impactful for ESG maturity.",
+                first_step="Use a 5-question anonymous survey and monitor trend lines.",
+                estimated_cost_savings_php=7000,
+            ),
+            "governance": QuickWinItem(
+                title="Assign ESG ownership and a 30-minute monthly review",
+                impact_area="governance",
+                effort="low",
+                expected_benefit="Turns ESG from ad-hoc efforts into repeatable execution.",
+                why_recommended="Clear ownership is the single biggest predictor of sustained progress.",
+                first_step="Nominate one owner and create a recurring review meeting.",
+                estimated_cost_savings_php=6000,
+            ),
+            "data_foundation": QuickWinItem(
+                title="Build one shared ESG data template",
+                impact_area="data_foundation",
+                effort="low",
+                expected_benefit="Avoid rework and make monthly updates take minutes, not hours.",
+                why_recommended="A clean data template removes the biggest SME ESG bottleneck.",
+                first_step="Define core fields for energy, emissions, waste, and headcount.",
+                estimated_cost_savings_php=15000,
+            ),
+            "supply_chain": QuickWinItem(
+                title="Collect top-5 supplier sustainability details",
+                impact_area="supply_chain",
+                effort="medium",
+                expected_benefit="Improve procurement risk visibility and customer trust.",
+                why_recommended="Most SMEs can start supply chain ESG with a small supplier subset.",
+                first_step="Request environmental and labor policy docs from your largest suppliers.",
+                estimated_cost_savings_php=11000,
+            ),
+        }
+
+        quick_wins: list[QuickWinItem] = []
+        for area in focus_areas:
+            item = suggestions_by_area.get(area)
+            if item and item.title not in {win.title for win in quick_wins}:
+                quick_wins.append(item)
+            if len(quick_wins) >= 5:
+                break
+
+        if not quick_wins:
+            quick_wins.append(suggestions_by_area["data_foundation"])
+
+        return quick_wins
+
+    def _infer_disclosure_tag(self, filename: str, notes: str | None) -> str:
+        normalized = f"{filename} {notes or ''}".lower()
+        if any(token in normalized for token in ["waste", "segregation", "landfill"]):
+            return "306-3"
+        if any(token in normalized for token in ["diesel", "fuel", "fleet"]):
+            return "305-1"
+        if any(
+            token in normalized for token in ["electric", "kwh", "utility", "power"]
+        ):
+            return "302-1"
+        if any(
+            token in normalized
+            for token in ["hire", "turnover", "headcount", "hr", "payroll"]
+        ):
+            return "401-1"
+        return "302-1"
+
+    def _save_evidence_bytes(self, company_id: str, file_id: str, binary: bytes) -> str:
+        company_dir = self.evidence_root / company_id / "evidence"
+        company_dir.mkdir(parents=True, exist_ok=True)
+        file_path = company_dir / file_id
+        file_path.write_bytes(binary)
+        return str(file_path)
+
+    async def _extract_fixed_metrics_with_ai(
+        self,
+        file_parts: list[types.Part],
+        fallback_headcount: Any,
+    ) -> FixedExtractionMetrics:
+        if self.ai is None:
+            return self._fixed_metrics_from_changes({}, fallback_headcount)
+
+        extraction_prompt = (
+            "Extract ESG values using this exact JSON schema only: "
+            "electricity_kwh, diesel_liters, waste_kg, headcount, new_hires, turnover_count, missing_fields. "
+            "If a value is absent, return null and include its field name in missing_fields. "
+            "Do not add extra keys."
+        )
+        structured_parts = [types.Part.from_text(text=extraction_prompt)]
+        if len(file_parts) > 1:
+            structured_parts.extend(file_parts[1:])
+
+        try:
+            response = await self.ai.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=structured_parts,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=FixedExtractionMetrics,
+                ),
+            )
+            if response.parsed:
+                return self._ensure_fixed_missing_fields(response.parsed)
+        except Exception:
+            pass
+
+        return self._fixed_metrics_from_changes({}, fallback_headcount)
+
+    def _ensure_fixed_missing_fields(
+        self,
+        metrics: FixedExtractionMetrics,
+    ) -> FixedExtractionMetrics:
+        fields = [
+            "electricity_kwh",
+            "diesel_liters",
+            "waste_kg",
+            "headcount",
+            "new_hires",
+            "turnover_count",
+        ]
+        missing_fields = [field for field in fields if getattr(metrics, field) is None]
+        return metrics.model_copy(update={"missing_fields": missing_fields})
+
+    def _fixed_metrics_from_changes(
+        self,
+        changes: dict[str, Any],
+        fallback_headcount: Any,
+    ) -> FixedExtractionMetrics:
+        electricity_kwh = self._extract_first_numeric(
+            changes,
+            ["electricity_kwh", "kwh", "energy_kwh"],
+        )
+        diesel_liters = self._extract_first_numeric(
+            changes,
+            ["diesel_liters", "fuel_liters", "fuel_usage_liters"],
+        )
+        waste_kg = self._extract_first_numeric(
+            changes,
+            ["waste_kg", "waste_generated_kg", "landfill_waste_kg"],
+        )
+
+        headcount_value = self._extract_first_numeric(
+            changes,
+            ["headcount", "employee_count", "employees"],
+        )
+        if headcount_value is None:
+            headcount_value = self._to_float(fallback_headcount)
+
+        new_hires = self._extract_first_numeric(
+            changes,
+            ["new_hires", "hires_count", "new_hires_count"],
+        )
+        turnover_count = self._extract_first_numeric(
+            changes,
+            ["turnover_count", "employee_turnover", "leavers_count"],
+        )
+
+        metrics = FixedExtractionMetrics(
+            electricity_kwh=electricity_kwh,
+            diesel_liters=diesel_liters,
+            waste_kg=waste_kg,
+            headcount=self._to_int(headcount_value),
+            new_hires=self._to_int(new_hires),
+            turnover_count=self._to_int(turnover_count),
+        )
+        return self._ensure_fixed_missing_fields(metrics)
+
+    def _extract_first_numeric(
+        self,
+        payload: dict[str, Any],
+        keys: list[str],
+    ) -> float | None:
+        for key in keys:
+            if key in payload:
+                value = self._to_float(payload.get(key))
+                if value is not None:
+                    return value
+        return None
+
+    def _run_submission_pipeline(
+        self,
+        company_id: str,
+        company_data: dict[str, Any],
+        fixed_extraction: FixedExtractionMetrics,
+        source: str,
+        month: str | None,
+        changes: dict[str, Any] | None,
+        notes: str | None,
+        evidence_records: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        base_year = month[:4] if month else str(datetime.now(timezone.utc).year)
+
+        gri_302, gri_305, gri_401 = self._map_fixed_metrics_to_gri_models(
+            fixed_extraction=fixed_extraction,
+            company_data=company_data,
+            base_year=base_year,
+        )
+
+        computations = {
+            "gri_302": self.GRI302Engine.run(gri_302),
+            "gri_305": self.GRI305Engine.run(gri_305),
+            "gri_401": self.GRI401Engine.run(gri_401),
+        }
+
+        submission_id = str(uuid4())
+        report_payload = self._build_report_from_results(
+            company_id=company_id,
+            submission_id=submission_id,
+            fixed_extraction=fixed_extraction,
+            computations=computations,
+        )
+        dashboard_payload = self._build_dashboard_from_results(
+            fixed_extraction=fixed_extraction,
+            computations=computations,
+        )
+
+        submission_payload = {
+            "submission_id": submission_id,
+            "source": source,
+            "month": month,
+            "notes": notes,
+            "changes": changes or {},
+            "fixed_extraction": fixed_extraction.model_dump(mode="json"),
+            "gri_models": {
+                "gri_302": gri_302.model_dump(mode="json"),
+                "gri_305": gri_305.model_dump(mode="json"),
+                "gri_401": gri_401.model_dump(mode="json"),
+            },
+            "computations": computations,
+            "dashboard": dashboard_payload,
+            "report": report_payload,
+            "evidence": evidence_records,
+            "submitted_at": self._utc_now_iso(),
+        }
+
+        self.repo.save_submission(company_id, submission_payload)
+        self.repo.save_latest_dashboard(company_id, dashboard_payload)
+        self.repo.save_latest_report(company_id, report_payload)
+
+        return submission_payload
+
+    def _map_fixed_metrics_to_gri_models(
+        self,
+        fixed_extraction: FixedExtractionMetrics,
+        company_data: dict[str, Any],
+        base_year: str,
+    ) -> tuple[AIExtracted_GRI_302, AIExtracted_GRI_305, AIExtracted_GRI_401]:
+        profile = company_data.get("profile", {})
+        headcount = fixed_extraction.headcount
+        if headcount is None:
+            headcount = self._to_int(profile.get("employee_count"))
+        revenue = self._to_float(profile.get("annual_revenue"))
+
+        energy_entries: list[EnergyEntry] = []
+        if fixed_extraction.electricity_kwh is not None:
+            energy_entries.append(
+                EnergyEntry(
+                    energy_type="electricity",
+                    value=fixed_extraction.electricity_kwh,
+                    unit="kWh",
+                    converted_mj=round(fixed_extraction.electricity_kwh * 3.6, 3),
+                    is_renewable=False,
+                    source="grid electricity",
+                    confidence=0.85,
+                )
+            )
+        if fixed_extraction.diesel_liters is not None:
+            energy_entries.append(
+                EnergyEntry(
+                    energy_type="diesel",
+                    value=fixed_extraction.diesel_liters,
+                    unit="liters",
+                    converted_mj=round(fixed_extraction.diesel_liters * 36.54, 3),
+                    is_renewable=False,
+                    source="diesel fuel",
+                    confidence=0.85,
+                )
+            )
+
+        total_energy_mj = (
+            round(sum(item.converted_mj for item in energy_entries), 3)
+            if energy_entries
+            else None
+        )
+        external_energy_mj = (
+            round(fixed_extraction.electricity_kwh * 3.6, 3)
+            if fixed_extraction.electricity_kwh is not None
+            else None
+        )
+        intensity_denominator = (
+            "per_employee"
+            if headcount is not None
+            else ("per_revenue_unit" if revenue is not None else None)
+        )
+
+        omissions_302: list[Omission302] = []
+        if not energy_entries:
+            omissions_302.append(
+                Omission302(
+                    field_name="energy_entries",
+                    reason="No electricity_kwh or diesel_liters values were extracted.",
+                )
+            )
+        if total_energy_mj is None:
+            omissions_302.append(
+                Omission302(
+                    field_name="total_energy_mj",
+                    reason="Unable to compute total energy without extracted energy entries.",
+                )
+            )
+        if headcount is None and revenue is None:
+            omissions_302.append(
+                Omission302(
+                    field_name="employee_count",
+                    reason="No headcount is available for energy intensity calculations.",
+                )
+            )
+
+        extracted_302 = AIExtracted_GRI_302(
+            energy_entries=energy_entries or None,
+            total_energy_mj=total_energy_mj,
+            renewable_energy_mj=0.0 if energy_entries else None,
+            non_renewable_energy_mj=total_energy_mj,
+            external_energy_mj=external_energy_mj,
+            employee_count=headcount,
+            revenue=revenue,
+            intensity_denominator=intensity_denominator,
+            energy_reduction_mj=None,
+            baseline_year=None,
+            product_energy_reduction_mj=None,
+            conversion_factors=ConversionFactors(),
+            base_year=base_year,
+            omitted_fields=omissions_302,
+        )
+
+        scope1_entries: list[EmissionEntry] = []
+        if fixed_extraction.diesel_liters is not None:
+            diesel_kg = round(fixed_extraction.diesel_liters * 2.68, 3)
+            scope1_entries.append(
+                EmissionEntry(
+                    source="diesel combustion",
+                    fuel_or_activity="diesel",
+                    quantity=fixed_extraction.diesel_liters,
+                    unit="liters",
+                    emission_factor=2.68,
+                    emission_factor_unit="kg CO2e/liter",
+                    emissions_kg_co2e=diesel_kg,
+                    ghg_gases_included=["CO2", "CH4", "N2O"],
+                    is_biogenic=False,
+                    confidence=0.85,
+                )
+            )
+
+        scope2_entries: list[EmissionEntry] = []
+        if fixed_extraction.electricity_kwh is not None:
+            electricity_kg = round(fixed_extraction.electricity_kwh * 0.55, 3)
+            scope2_entries.append(
+                EmissionEntry(
+                    source="grid electricity",
+                    fuel_or_activity="electricity",
+                    quantity=fixed_extraction.electricity_kwh,
+                    unit="kWh",
+                    emission_factor=0.55,
+                    emission_factor_unit="kg CO2e/kWh",
+                    emissions_kg_co2e=electricity_kg,
+                    ghg_gases_included=["CO2"],
+                    is_biogenic=False,
+                    confidence=0.85,
+                )
+            )
+
+        scope1_total = (
+            round(sum(entry.emissions_kg_co2e for entry in scope1_entries), 3)
+            if scope1_entries
+            else None
+        )
+        scope2_total = (
+            round(sum(entry.emissions_kg_co2e for entry in scope2_entries), 3)
+            if scope2_entries
+            else None
+        )
+        scope3_total = (
+            round(fixed_extraction.waste_kg * 1.9, 3)
+            if fixed_extraction.waste_kg is not None
+            else None
+        )
+
+        omissions_305: list[Omission305] = []
+        if not scope1_entries:
+            omissions_305.append(
+                Omission305(
+                    field_name="scope1_entries",
+                    reason="No diesel or direct fuel activity data was extracted.",
+                )
+            )
+        if not scope2_entries:
+            omissions_305.append(
+                Omission305(
+                    field_name="scope2_entries",
+                    reason="No electricity_kwh value was extracted for Scope 2.",
+                )
+            )
+        if scope3_total is None:
+            omissions_305.append(
+                Omission305(
+                    field_name="scope3_total_kg_co2e",
+                    reason="No waste_kg value was extracted for a Scope 3 proxy.",
+                )
+            )
+
+        extracted_305 = AIExtracted_GRI_305(
+            scope1_entries=scope1_entries or None,
+            scope1_total_kg_co2e=scope1_total,
+            scope1_biogenic_kg_co2=0.0 if scope1_total is not None else None,
+            scope2_entries=scope2_entries or None,
+            scope2_location_based_kg_co2e=scope2_total,
+            scope2_market_based_kg_co2e=None,
+            scope2_biogenic_kg_co2=0.0 if scope2_total is not None else None,
+            scope3_total_kg_co2e=scope3_total,
+            scope3_categories_included=(
+                ["waste_generated_in_operations"] if scope3_total is not None else None
+            ),
+            scope3_biogenic_kg_co2=None,
+            employee_count=headcount,
+            revenue=revenue,
+            intensity_denominator=intensity_denominator,
+            intensity_scopes_included=(
+                ["scope1", "scope2"] if scope1_total or scope2_total else None
+            ),
+            ghg_reduction_kg_co2e=None,
+            reduction_scopes_included=None,
+            baseline_year=None,
+            ods_kg_cfc11e=None,
+            ods_substances=None,
+            nox_kg=None,
+            sox_kg=None,
+            voc_kg=None,
+            pm_kg=None,
+            emission_factor_metadata=EmissionFactorMetadata(
+                source="IPCC Default Emission Factors 2006",
+                calculation_methodology="location-based",
+            ),
+            base_year=base_year,
+            omitted_fields=omissions_305,
+        )
+
+        omissions_401: list[Omission401] = []
+        if fixed_extraction.new_hires is None:
+            omissions_401.append(
+                Omission401(
+                    field_name="total_new_hires",
+                    reason="New hire count is not available in current submission data.",
+                )
+            )
+        if fixed_extraction.turnover_count is None:
+            omissions_401.append(
+                Omission401(
+                    field_name="total_turnover",
+                    reason="Turnover count is not available in current submission data.",
+                )
+            )
+        if headcount is None:
+            omissions_401.append(
+                Omission401(
+                    field_name="new_hire_rate",
+                    reason="Headcount metadata is missing for workforce rate calculations.",
+                )
+            )
+
+        new_hire_rate = None
+        turnover_rate = None
+        if headcount and headcount > 0:
+            if fixed_extraction.new_hires is not None:
+                new_hire_rate = round((fixed_extraction.new_hires / headcount) * 100, 2)
+            if fixed_extraction.turnover_count is not None:
+                turnover_rate = round(
+                    (fixed_extraction.turnover_count / headcount) * 100, 2
+                )
+
+        extracted_401 = AIExtracted_GRI_401(
+            total_new_hires=fixed_extraction.new_hires,
+            new_hire_rate=new_hire_rate,
+            new_hires_by_gender=None,
+            new_hires_by_age_group=None,
+            new_hires_by_region=None,
+            total_turnover=fixed_extraction.turnover_count,
+            turnover_rate=turnover_rate,
+            turnover_by_gender=None,
+            turnover_by_age_group=None,
+            turnover_by_region=None,
+            benefits=None,
+            significant_location=profile.get("location"),
+            parental_leave_by_gender=None,
+            return_to_work_rate_by_gender=None,
+            retention_rate_by_gender=None,
+            employee_count=headcount,
+            base_year=base_year,
+            omitted_fields=omissions_401,
+        )
+
+        return extracted_302, extracted_305, extracted_401
+
+    def _build_dashboard_from_results(
+        self,
+        fixed_extraction: FixedExtractionMetrics,
+        computations: dict[str, Any],
+    ) -> dict[str, Any]:
+        summaries = [
+            computations.get("gri_302", {}).get("summary", {}),
+            computations.get("gri_305", {}).get("summary", {}),
+            computations.get("gri_401", {}).get("summary", {}),
+        ]
+        total_count = sum(int(item.get("total_count", 0)) for item in summaries)
+        computed_count = sum(int(item.get("computed_count", 0)) for item in summaries)
+        coverage = (computed_count / total_count) if total_count > 0 else 0.0
+
+        esg_score = round(min(100.0, coverage * 100), 1)
+        compliance_status = "On Track" if coverage >= 0.6 else "Needs Attention"
+
+        kpis: list[DashboardKPI] = []
+
+        total_energy = (
+            computations.get("gri_302", {})
+            .get("302_1", {})
+            .get("value", {})
+            .get("total_energy_mj")
+        )
+        if total_energy is not None:
+            kpis.append(
+                DashboardKPI(
+                    name="Total Energy",
+                    value=round(float(total_energy), 2),
+                    unit="MJ",
+                    rating=self._rate_kpi("energy", float(total_energy)),
+                )
+            )
+
+        scope1_total = (
+            computations.get("gri_305", {})
+            .get("305_1", {})
+            .get("value", {})
+            .get("total_kg_co2e")
+        )
+        if scope1_total is not None:
+            kpis.append(
+                DashboardKPI(
+                    name="Scope 1 Emissions",
+                    value=round(float(scope1_total), 2),
+                    unit="kg CO2e",
+                    rating=self._rate_kpi("emissions", float(scope1_total)),
+                )
+            )
+
+        scope2_total = (
+            computations.get("gri_305", {})
+            .get("305_2", {})
+            .get("value", {})
+            .get("location_based_kg_co2e")
+        )
+        if scope2_total is not None:
+            kpis.append(
+                DashboardKPI(
+                    name="Scope 2 Emissions",
+                    value=round(float(scope2_total), 2),
+                    unit="kg CO2e",
+                    rating=self._rate_kpi("emissions", float(scope2_total)),
+                )
+            )
+
+        if fixed_extraction.waste_kg is not None:
+            kpis.append(
+                DashboardKPI(
+                    name="Waste Generated",
+                    value=round(float(fixed_extraction.waste_kg), 2),
+                    unit="kg",
+                    rating=self._rate_kpi("waste", float(fixed_extraction.waste_kg)),
+                )
+            )
+
+        hires_rate = (
+            computations.get("gri_401", {})
+            .get("401_1", {})
+            .get("value", {})
+            .get("new_hires", {})
+            .get("rate")
+        )
+        if hires_rate is not None:
+            kpis.append(
+                DashboardKPI(
+                    name="New Hire Rate",
+                    value=round(float(hires_rate), 2),
+                    unit="%",
+                    rating=self._rate_kpi("new_hire_rate", float(hires_rate)),
+                )
+            )
+
+        turnover_rate = (
+            computations.get("gri_401", {})
+            .get("401_1", {})
+            .get("value", {})
+            .get("turnover", {})
+            .get("rate")
+        )
+        if turnover_rate is not None:
+            kpis.append(
+                DashboardKPI(
+                    name="Turnover Rate",
+                    value=round(float(turnover_rate), 2),
+                    unit="%",
+                    rating=self._rate_kpi("turnover_rate", float(turnover_rate)),
+                )
+            )
+
+        if len(kpis) < 3:
+            kpis.append(
+                DashboardKPI(
+                    name="GRI Coverage",
+                    value=round(coverage * 100, 1),
+                    unit="%",
+                    rating=self._rate_kpi("coverage", coverage * 100),
+                )
+            )
+
+        return {
+            "esg_score": esg_score,
+            "compliance_status": compliance_status,
+            "kpis": [item.model_dump(mode="json") for item in kpis[:8]],
+            "computed_count": computed_count,
+            "total_count": total_count,
+        }
+
+    def _rate_kpi(self, kind: str, value: float) -> Literal["Good", "Better", "Best"]:
+        if kind in {"energy", "emissions", "waste", "turnover_rate"}:
+            if value <= 1000:
+                return "Best"
+            if value <= 5000:
+                return "Better"
+            return "Good"
+
+        if kind == "new_hire_rate":
+            if value >= 10:
+                return "Best"
+            if value >= 5:
+                return "Better"
+            return "Good"
+
+        if kind == "coverage":
+            if value >= 80:
+                return "Best"
+            if value >= 60:
+                return "Better"
+            return "Good"
+
+        return "Better"
+
+    def _build_report_from_results(
+        self,
+        company_id: str,
+        submission_id: str,
+        fixed_extraction: FixedExtractionMetrics,
+        computations: dict[str, Any],
+    ) -> dict[str, Any]:
+        disclosures: list[ESGReportDisclosure] = []
+        reasons_for_omission: list[OmissionReason] = []
+
+        report_map = [
+            (
+                "302-1",
+                "Energy consumption within the organization",
+                computations.get("gri_302", {}).get("302_1", {}),
+            ),
+            (
+                "302-3",
+                "Energy intensity",
+                computations.get("gri_302", {}).get("302_3", {}),
+            ),
+            (
+                "305-1",
+                "Direct (Scope 1) GHG emissions",
+                computations.get("gri_305", {}).get("305_1", {}),
+            ),
+            (
+                "305-2",
+                "Energy indirect (Scope 2) GHG emissions",
+                computations.get("gri_305", {}).get("305_2", {}),
+            ),
+            (
+                "305-4",
+                "GHG emissions intensity",
+                computations.get("gri_305", {}).get("305_4", {}),
+            ),
+            (
+                "401-1",
+                "New employee hires and employee turnover",
+                computations.get("gri_401", {}).get("401_1", {}),
+            ),
+        ]
+
+        for disclosure_code, title, result in report_map:
+            computed = bool(result.get("computed"))
+            reason = result.get("reason")
+            entry = ESGReportDisclosure(
+                disclosure=disclosure_code,
+                title=title,
+                computed=computed,
+                value=result.get("value"),
+                unit=result.get("unit"),
+                reason_for_omission=reason if not computed else None,
+            )
+            disclosures.append(entry)
+            if not computed:
+                reasons_for_omission.append(
+                    OmissionReason(
+                        disclosure=disclosure_code,
+                        reason=reason or "Not enough data to compute this disclosure.",
+                    )
+                )
+
+        if fixed_extraction.waste_kg is not None:
+            disclosures.append(
+                ESGReportDisclosure(
+                    disclosure="306-3",
+                    title="Waste generated",
+                    computed=True,
+                    value={"waste_generated_kg": round(fixed_extraction.waste_kg, 2)},
+                    unit="kg",
+                )
+            )
+            disclosures.append(
+                ESGReportDisclosure(
+                    disclosure="306-4",
+                    title="Waste diverted from disposal",
+                    computed=True,
+                    value={
+                        "waste_diverted_kg": round(fixed_extraction.waste_kg * 0.3, 2),
+                        "assumed_diversion_ratio": 0.3,
+                    },
+                    unit="kg",
+                )
+            )
+        else:
+            disclosures.append(
+                ESGReportDisclosure(
+                    disclosure="306-3",
+                    title="Waste generated",
+                    computed=False,
+                    value=None,
+                    unit="kg",
+                    reason_for_omission="Missing required field: waste_kg.",
+                )
+            )
+            disclosures.append(
+                ESGReportDisclosure(
+                    disclosure="306-4",
+                    title="Waste diverted from disposal",
+                    computed=False,
+                    value=None,
+                    unit="kg",
+                    reason_for_omission="Cannot compute without waste_kg baseline.",
+                )
+            )
+            reasons_for_omission.append(
+                OmissionReason(
+                    disclosure="306-3",
+                    reason="Missing required field: waste_kg.",
+                )
+            )
+            reasons_for_omission.append(
+                OmissionReason(
+                    disclosure="306-4",
+                    reason="Cannot compute without waste_kg baseline.",
+                )
+            )
+
+        return ESGReportResponse(
+            company_id=company_id,
+            generated_at=datetime.now(timezone.utc),
+            disclosures=disclosures,
+            reasons_for_omission=reasons_for_omission,
+            source_submission_id=submission_id,
+        ).model_dump(mode="json")
+
+    def _build_report_payload(
+        self,
+        company_id: str,
+        submission_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        report = submission_payload.get("report")
+        if isinstance(report, dict) and report.get("disclosures"):
+            return report
+
+        fixed_extraction = FixedExtractionMetrics.model_validate(
+            submission_payload.get("fixed_extraction", {})
+        )
+        computations = submission_payload.get("computations", {})
+        submission_id = str(submission_payload.get("submission_id", uuid4()))
+        return self._build_report_from_results(
+            company_id=company_id,
+            submission_id=submission_id,
+            fixed_extraction=fixed_extraction,
+            computations=computations,
+        )
+
+    def _kpi_labels_from_submission(
+        self,
+        submission_payload: dict[str, Any] | None,
+    ) -> list[str]:
+        if not submission_payload:
+            return []
+        dashboard = submission_payload.get("dashboard", {})
+        labels = []
+        for item in dashboard.get("kpis", []):
+            name = str(item.get("name", "")).strip()
+            if name:
+                labels.append(name)
+        return labels
+
+    async def _refresh_plan_from_latest_pipeline(
+        self,
+        company_id: str,
+        company_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        existing_plan = company_data.get("plan") or {}
+        if not existing_plan:
+            return {}
+
+        latest_submission = self.repo.get_latest_submission(company_id)
+        latest_report = self.repo.get_latest_report(company_id)
+        kpis = self._kpi_labels_from_submission(latest_submission)
+        ready_for_pdf = bool(latest_report and latest_report.get("disclosures"))
+
+        summary = str(existing_plan.get("one_page_summary", "")).strip()
+        if kpis:
+            summary_prompt = (
+                "Rewrite this ESG plan summary to include monthly update momentum and latest KPI focus areas. "
+                "Return plain text only in 3-4 short sentences.\n"
+                f"Current summary: {summary}\n"
+                f"KPI focus: {kpis}"
+            )
+            summary = await self._safe_ai_summary(
+                summary_prompt,
+                fallback=summary,
+                max_sentences=4,
+            )
+
+        refreshed_plan = {
+            **existing_plan,
+            "generated_at": self._utc_now_iso(),
+            "one_page_summary": summary,
+            "kpis": kpis,
+            "ready_for_pdf": ready_for_pdf,
+        }
+        self.repo.save_plan(company_id, refreshed_plan)
+        return refreshed_plan
+
+    @staticmethod
+    def _stringify_report_value(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (str, int, float, bool)):
+            return str(value)
+        return str(value)
+
+    @staticmethod
+    def _escape_pdf_text(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+    def _build_simple_pdf(self, lines: list[str]) -> bytes:
+        text_lines = [self._escape_pdf_text(line[:120]) for line in lines[:120]]
+        if not text_lines:
+            text_lines = ["ESG Report"]
+
+        content_commands = ["BT", "/F1 10 Tf", "50 790 Td"]
+        first_line = True
+        for line in text_lines:
+            if first_line:
+                content_commands.append(f"({line}) Tj")
+                first_line = False
+            else:
+                content_commands.append("0 -14 Td")
+                content_commands.append(f"({line}) Tj")
+        content_commands.append("ET")
+        stream = "\n".join(content_commands).encode("latin-1", errors="replace")
+
+        objects: list[bytes] = [
+            b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+            b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
+            b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+            b"5 0 obj\n<< /Length "
+            + str(len(stream)).encode("ascii")
+            + b" >>\nstream\n"
+            + stream
+            + b"\nendstream\nendobj\n",
+        ]
+
+        pdf = bytearray(b"%PDF-1.4\n")
+        offsets: list[int] = [0]
+
+        for obj in objects:
+            offsets.append(len(pdf))
+            pdf.extend(obj)
+
+        xref_start = len(pdf)
+        pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+        pdf.extend(b"0000000000 65535 f \n")
+        for offset in offsets[1:]:
+            pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+
+        pdf.extend(
+            (
+                f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+                f"startxref\n{xref_start}\n%%EOF"
+            ).encode("ascii")
+        )
+
+        return bytes(pdf)
+
+    @staticmethod
+    def _to_int(value: Any) -> int | None:
+        parsed = ESGWorkflowService._to_float(value)
+        if parsed is None:
+            return None
+        return int(round(parsed))
 
     @staticmethod
     def _to_float(value: Any) -> float | None:

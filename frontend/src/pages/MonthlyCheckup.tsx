@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import { Upload } from 'lucide-react';
 
 import AppLayout from '../components/layout/AppLayout';
 import Button from '../components/ui/Button';
@@ -11,6 +12,7 @@ import { formatAiText } from '../lib/aiText';
 import {
   getMonthlyUpdateQuestions,
   submitMonthlyUpdate,
+  submitMonthlyUpdateWithFiles,
 } from '../lib/workflowApi';
 import type {
   MonthlyUpdateQuestion,
@@ -24,6 +26,7 @@ function getDefaultMonth(): string {
 
 export default function MonthlyCheckup() {
   const profile = useMemo(() => getStoredCompanyProfile(), []);
+  const monthlyFileInputRef = useRef<HTMLInputElement>(null);
 
   const [month, setMonth] = useState(getDefaultMonth());
   const [monthlyQuestions, setMonthlyQuestions] = useState<MonthlyUpdateQuestionsResponse | null>(null);
@@ -33,6 +36,7 @@ export default function MonthlyCheckup() {
   const [isSubmittingMonthly, setIsSubmittingMonthly] = useState(false);
   const [monthlyError, setMonthlyError] = useState<string | null>(null);
   const [monthlyResult, setMonthlyResult] = useState<MonthlyUpdateResponse | null>(null);
+  const [monthlyFiles, setMonthlyFiles] = useState<File[]>([]);
 
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
@@ -69,12 +73,15 @@ export default function MonthlyCheckup() {
     try {
       setIsSubmittingMonthly(true);
       setMonthlyError(null);
-      const response = await submitMonthlyUpdate({
+      const payload = {
         company_id: profile.companyId,
         month,
         changes: monthlyAnswers,
         notes: monthlyNotes || undefined,
-      });
+      };
+      const response = monthlyFiles.length > 0
+        ? await submitMonthlyUpdateWithFiles(payload, monthlyFiles)
+        : await submitMonthlyUpdate(payload);
       setMonthlyResult(response);
     } catch (error) {
       setMonthlyError(error instanceof Error ? error.message : 'Could not submit monthly update.');
@@ -201,6 +208,34 @@ export default function MonthlyCheckup() {
             onChange={(event) => setMonthlyNotes(event.target.value)}
             placeholder="Optional details for this month"
           />
+
+          <div className="space-y-2">
+            <p className={`text-sm font-medium ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>
+              Attach Monthly Evidence (optional)
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                icon={<Upload className="w-4 h-4" />}
+                onClick={() => monthlyFileInputRef.current?.click()}
+              >
+                Add Files
+              </Button>
+              <input
+                ref={monthlyFileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                accept=".pdf,.jpg,.jpeg,.png,.webp,.csv,.xlsx,.xls"
+                onChange={(event) => setMonthlyFiles(Array.from(event.target.files ?? []))}
+              />
+              {monthlyFiles.length > 0 && (
+                <span className={`text-xs ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>
+                  {monthlyFiles.length} file(s) selected
+                </span>
+              )}
+            </div>
+          </div>
 
           {monthlyError && (
             <div className={`rounded-lg p-3 text-sm ${isDark ? 'bg-red-500/10 text-red-300' : 'bg-red-50 text-red-600'}`}>

@@ -13,6 +13,7 @@ class OnboardingQuizContext(BaseModel):
     employee_count: int = Field(ge=1)
     annual_revenue: float | None = Field(default=None, ge=0)
     primary_country: str | None = None
+    location: str | None = None
 
 
 class WorkflowQuestion(BaseModel):
@@ -82,6 +83,8 @@ class ESGPlanResponse(BaseModel):
     priority_themes: list[str]
     actions: list[ESGPlanAction]
     monthly_check_in_questions: list[str]
+    kpis: list[str] = Field(default_factory=list)
+    ready_for_pdf: bool = False
 
 
 class UploadedFileRecord(BaseModel):
@@ -90,6 +93,21 @@ class UploadedFileRecord(BaseModel):
     media_type: str
     size_bytes: int = Field(ge=0)
     uploaded_at: datetime
+    disclosure_tag: str | None = None
+
+
+class EvidenceFileRecord(BaseModel):
+    file_id: str
+    filename: str
+    media_type: str
+    size_bytes: int = Field(ge=0)
+    uploaded_at: datetime
+    disclosure_tag: str | None = None
+
+
+class EvidenceListResponse(BaseModel):
+    company_id: str
+    evidence_files: list[EvidenceFileRecord]
 
 
 class ExtractedMetric(BaseModel):
@@ -109,12 +127,23 @@ class AIFileExtractionResult(BaseModel):
     follow_up_questions: list[str] = Field(default_factory=list)
 
 
+class FixedExtractionMetrics(BaseModel):
+    electricity_kwh: float | None = Field(default=None, ge=0)
+    diesel_liters: float | None = Field(default=None, ge=0)
+    waste_kg: float | None = Field(default=None, ge=0)
+    headcount: int | None = Field(default=None, ge=0)
+    new_hires: int | None = Field(default=None, ge=0)
+    turnover_count: int | None = Field(default=None, ge=0)
+    missing_fields: list[str] = Field(default_factory=list)
+
+
 class FileExtractionResponse(BaseModel):
     company_id: str
     files: list[UploadedFileRecord]
     extracted_metrics: list[ExtractedMetric]
     ai_summary: str
     follow_up_questions: list[str]
+    fixed_extraction: FixedExtractionMetrics | None = None
 
 
 class ResponseLibraryEntry(BaseModel):
@@ -137,6 +166,18 @@ class ProgressStep(BaseModel):
     improvement_tip: str
 
 
+class DashboardKPI(BaseModel):
+    name: str
+    value: float | int | str
+    unit: str | None = None
+    rating: Literal["Good", "Better", "Best"]
+
+
+class OmissionReason(BaseModel):
+    disclosure: str
+    reason: str
+
+
 class ProgressTrackerResponse(BaseModel):
     company_id: str
     completion_percentage: float = Field(ge=0, le=100)
@@ -148,6 +189,10 @@ class ProgressTrackerResponse(BaseModel):
     ]
     steps: list[ProgressStep]
     next_best_actions: list[str]
+    esg_score: float = Field(default=0, ge=0, le=100)
+    compliance_status: Literal["On Track", "Needs Attention"] = "Needs Attention"
+    kpis: list[DashboardKPI] = Field(default_factory=list)
+    quick_wins_with_savings: list[QuickWinItem] = Field(default_factory=list)
 
 
 class QuickWinItem(BaseModel):
@@ -157,6 +202,7 @@ class QuickWinItem(BaseModel):
     expected_benefit: str
     why_recommended: str
     first_step: str
+    estimated_cost_savings_php: float | None = Field(default=None, ge=0)
 
 
 class QuickWinsResponse(BaseModel):
@@ -194,3 +240,23 @@ class MonthlyUpdateResponse(BaseModel):
     change_summary: list[str]
     updated_focus_areas: list[FocusArea]
     recommended_next_actions: list[str]
+    submission_id: str | None = None
+    pipeline_refreshed: bool = False
+    updated_plan_ready_for_pdf: bool = False
+
+
+class ESGReportDisclosure(BaseModel):
+    disclosure: str
+    title: str
+    computed: bool
+    value: Any = None
+    unit: str | None = None
+    reason_for_omission: str | None = None
+
+
+class ESGReportResponse(BaseModel):
+    company_id: str
+    generated_at: datetime
+    disclosures: list[ESGReportDisclosure]
+    reasons_for_omission: list[OmissionReason] = Field(default_factory=list)
+    source_submission_id: str | None = None
