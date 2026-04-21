@@ -6,6 +6,7 @@ import Button from '../ui/Button';
 import { useThemeStore } from '../../stores/themeStore';
 import { getStoredCompanyProfile, toOnboardingContext } from '../../lib/companyProfile';
 import { getOnboardingQuiz, submitOnboarding } from '../../lib/workflowApi';
+import { formatAiText } from '../../lib/aiText';
 import type {
   OnboardingQuizResponse,
   OnboardingRecommendationResponse,
@@ -45,6 +46,9 @@ export default function OnboardingCard({ onDismiss, onComplete }: OnboardingCard
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
   const profile = useMemo(() => getStoredCompanyProfile(), []);
+  const formattedRecommendationSummary = recommendation
+    ? formatAiText(recommendation.recommendation_summary)
+    : '';
 
   const startOnboarding = async () => {
     try {
@@ -288,8 +292,8 @@ export default function OnboardingCard({ onDismiss, onComplete }: OnboardingCard
 
           {recommendation && (
             <div className="mt-4 space-y-3">
-              <p className={`text-sm ${isDark ? 'text-white/70' : 'text-[#3a4d63]'}`}>
-                {recommendation.recommendation_summary}
+              <p className={`text-sm whitespace-pre-line ${isDark ? 'text-white/70' : 'text-[#3a4d63]'}`}>
+                {formattedRecommendationSummary}
               </p>
               <div className="flex flex-wrap gap-2">
                 {recommendation.focus_areas.map((focus) => (
@@ -303,8 +307,8 @@ export default function OnboardingCard({ onDismiss, onComplete }: OnboardingCard
                 ))}
               </div>
               <ul className={`text-sm space-y-1 ${isDark ? 'text-white/70' : 'text-[#3a4d63]'}`}>
-                {recommendation.next_steps.map((step) => (
-                  <li key={step}>• {step}</li>
+                {recommendation.next_steps.map((step, index) => (
+                  <li key={`${index}-${step}`}>• {formatAiText(step)}</li>
                 ))}
               </ul>
               <div className="flex flex-wrap gap-3">

@@ -9,7 +9,7 @@ const actions = [
   { icon: FileInput, label: 'Upload Data', description: 'Add energy, carbon, or waste records', path: '/data-input' },
   { icon: FileText, label: 'Generate Plan', description: 'Create your one-page ESG action plan', path: '/reports' },
   { icon: Download, label: 'Response Library', description: 'Reuse generated ESG responses', path: '/response-library' },
-  { icon: FileBarChart, label: 'Monthly Update', description: 'Submit this month\'s ESG changes', path: '/data-input' },
+  { icon: FileBarChart, label: 'Monthly Checkup', description: 'Submit this month\'s ESG changes', path: '/monthly-checkup' },
 ];
 
 interface QuickActionsProps {

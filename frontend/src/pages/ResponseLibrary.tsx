@@ -9,6 +9,7 @@ import Button from '../components/ui/Button';
 import { useThemeStore } from '../stores/themeStore';
 import { getStoredCompanyProfile } from '../lib/companyProfile';
 import { getResponseLibrary } from '../lib/workflowApi';
+import { formatAiText } from '../lib/aiText';
 import type { ResponseLibraryEntry } from '../types/workflow';
 
 type LibraryTemplate = {
@@ -32,7 +33,7 @@ function toTemplate(entry: ResponseLibraryEntry): LibraryTemplate {
       id: entry.entry_id,
       title: 'Onboarding Recommendation',
       category: 'Onboarding',
-      content: payload.recommendation_summary ?? JSON.stringify(entry.payload, null, 2),
+      content: formatAiText(payload.recommendation_summary ?? JSON.stringify(entry.payload, null, 2)),
     };
   }
 
@@ -41,7 +42,7 @@ function toTemplate(entry: ResponseLibraryEntry): LibraryTemplate {
       id: entry.entry_id,
       title: 'Auto-generated ESG Plan',
       category: 'Plan',
-      content: payload.one_page_summary ?? JSON.stringify(entry.payload, null, 2),
+      content: formatAiText(payload.one_page_summary ?? JSON.stringify(entry.payload, null, 2)),
     };
   }
 
@@ -50,7 +51,7 @@ function toTemplate(entry: ResponseLibraryEntry): LibraryTemplate {
       id: entry.entry_id,
       title: 'File Extraction Summary',
       category: 'Upload',
-      content: payload.ai_summary ?? JSON.stringify(entry.payload, null, 2),
+      content: formatAiText(payload.ai_summary ?? JSON.stringify(entry.payload, null, 2)),
     };
   }
 
@@ -58,7 +59,7 @@ function toTemplate(entry: ResponseLibraryEntry): LibraryTemplate {
     id: entry.entry_id,
     title: payload.month ? `Monthly Update ${payload.month}` : 'Monthly Update',
     category: 'Monthly',
-    content: payload.change_summary?.join('\n') ?? JSON.stringify(entry.payload, null, 2),
+    content: formatAiText(payload.change_summary?.join('\n') ?? JSON.stringify(entry.payload, null, 2)),
   };
 }
 
@@ -191,7 +192,7 @@ export default function ResponseLibrary() {
                     {copiedId === template.id ? 'Copied' : 'Copy'}
                   </Button>
                 </div>
-                <p className={`text-sm leading-relaxed ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>{template.content}</p>
+                <p className={`text-sm leading-relaxed whitespace-pre-line ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>{template.content}</p>
               </Card>
             </motion.div>
           ))}

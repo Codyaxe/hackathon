@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+import re
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 from fastapi import HTTPException, Request, UploadFile
@@ -33,6 +34,18 @@ from src.schemas.workflow_schemas import (
     UploadedFileRecord,
     WorkflowQuestion,
 )
+
+
+FocusAreaName = Literal[
+    "energy",
+    "emissions",
+    "waste",
+    "workforce",
+    "governance",
+    "data_foundation",
+    "supply_chain",
+]
+FocusPriority = Literal["high", "medium", "low"]
 
 
 class ESGWorkflowService:
@@ -74,15 +87,18 @@ class ESGWorkflowService:
             "to keep reporting simple and consistent."
         )
         summary_prompt = (
-            "You are an ESG advisor for SMEs. In 3-5 concise sentences, summarize where this company "
-            "should focus first and why. Keep it practical and non-technical.\n\n"
+            "You are an ESG advisor for SMEs.\n"
+            "Write a concise recommendation for a dashboard card.\n"
+            "Output plain text only (no markdown, no JSON, no bullet or numbered list symbols).\n"
+            "Keep it practical and non-technical in exactly 3-4 short sentences.\n"
+            "Do not add intro labels like 'Here is' or 'Recommendation'.\n\n"
             f"Industry: {submission.context.industry}\n"
             f"Employee count: {submission.context.employee_count}\n"
             f"Top focus areas: {[f.area for f in focus_areas]}\n"
             f"Answers: {answers}"
         )
         recommendation_summary = await self._safe_ai_summary(
-            summary_prompt, fallback_summary
+            summary_prompt, fallback_summary, max_sentences=4
         )
         next_steps = self._build_next_steps(focus_areas)
 
@@ -140,24 +156,26 @@ class ESGWorkflowService:
             "a reliable monthly data baseline for future reporting."
         )
         plan_prompt = (
-            "You are generating a structured ESG action plan. Output ONLY the plan — no preamble, no closing remarks. Do not invent any information not provided.\n\n"
+            "You are generating a structured ESG action plan.\n"
+            "Output plain text only (no markdown symbols, no JSON, no code fences).\n"
+            "Keep it concise and directly usable in a web dashboard.\n"
+            "Use this format exactly:\n"
+            "Plan overview: <2-3 sentences>\n"
+            "Immediate focus: <1-2 sentences>\n"
+            "Execution guidance: <1-2 sentences>\n\n"
             f"Company: {profile.get('company_name', 'This company')}\n"
             f"Industry: {profile.get('industry', 'Unknown')}\n"
             f"Employees: {profile.get('employee_count', 'Unknown')}\n"
             f"Focus areas: {', '.join(selected_themes)}\n\n"
-            "For each action below, output exactly this format:\n"
-            "## [title]\n"
-            "**Why it matters:** [why_it_matters]\n"
-            "**Owner:** [owner]\n"
-            "**Done when:** [success_metric]\n"
-            "**Timeline:** [timeline_weeks] weeks\n\n"
-            "Actions:\n"
+            "Action details:\n"
             + "\n".join(
                 f"- {a.title} | {a.why_it_matters} | owner: {a.owner} | metric: {a.success_metric} | weeks: {a.timeline_weeks}"
                 for a in actions
             )
         )
-        one_page_summary = await self._safe_ai_summary(plan_prompt, fallback_summary)
+        one_page_summary = await self._safe_ai_summary(
+            plan_prompt, fallback_summary, max_sentences=8
+        )
 
         monthly_questions = [
             "What changed most in your energy or fuel usage this month?",
@@ -633,7 +651,7 @@ class ESGWorkflowService:
     def _answers_to_map(self, answers) -> dict[str, Any]:
         return {answer.question_id: answer.value for answer in answers}
 
-    def _default_focus_by_industry(self, industry: str) -> list[str]:
+    def _default_focus_by_industry(self, industry: str) -> list[FocusAreaName]:
         normalized = industry.lower()
         if "manufact" in normalized or "industrial" in normalized:
             return ["energy", "emissions", "waste", "workforce", "data_foundation"]
@@ -654,7 +672,7 @@ class ESGWorkflowService:
     def _recommend_focus_areas(
         self, industry: str, employee_count: int, answers: dict[str, Any]
     ) -> list[FocusArea]:
-        scores = {
+        scores: dict[FocusAreaName, int] = {
             "energy": 0,
             "emissions": 0,
             "waste": 0,
@@ -663,7 +681,7 @@ class ESGWorkflowService:
             "data_foundation": 0,
             "supply_chain": 0,
         }
-        reasons: dict[str, list[str]] = {key: [] for key in scores}
+        reasons: dict[FocusAreaName, list[str]] = {key: [] for key in scores}
 
         for area in self._default_focus_by_industry(industry):
             scores[area] += 3
@@ -738,12 +756,15 @@ class ESGWorkflowService:
             )
 
         ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
-        top_ranked = [item for item in ranked if item[1] > 0][:4]
+        top_ranked: list[tuple[FocusAreaName, int]] = [
+            item for item in ranked if item[1] > 0
+        ][:4]
         if not top_ranked:
             top_ranked = [("data_foundation", 1)]
 
         focus: list[FocusArea] = []
         for area, score in top_ranked:
+            priority: FocusPriority
             if score >= 6:
                 priority = "high"
             elif score >= 4:
@@ -868,6 +889,9 @@ class ESGWorkflowService:
         file_parts: list[types.Part],
         upload_records: list[UploadedFileRecord],
     ) -> AIFileExtractionResult:
+        if self.ai is None:
+            return self._fallback_file_extraction(upload_records)
+
         try:
             response = await self.ai.models.generate_content(
                 model="gemini-2.5-flash",
@@ -979,7 +1003,15 @@ class ESGWorkflowService:
             ".webp",
         }
 
-    async def _safe_ai_summary(self, prompt: str, fallback: str) -> str:
+    async def _safe_ai_summary(
+        self,
+        prompt: str,
+        fallback: str,
+        max_sentences: int | None = None,
+    ) -> str:
+        if self.ai is None:
+            return self._sanitize_ai_text(fallback, max_sentences=max_sentences)
+
         try:
             response = await self.ai.models.generate_content(
                 model="gemini-2.5-flash",
@@ -987,10 +1019,41 @@ class ESGWorkflowService:
             )
             text = getattr(response, "text", None)
             if text and text.strip():
-                return text.strip()
+                return self._sanitize_ai_text(text, max_sentences=max_sentences)
         except Exception:
             pass
-        return fallback
+        return self._sanitize_ai_text(fallback, max_sentences=max_sentences)
+
+    @staticmethod
+    def _sanitize_ai_text(text: str, max_sentences: int | None = None) -> str:
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+        normalized = normalized.replace("```", "")
+        normalized = normalized.replace("`", "")
+        normalized = normalized.replace("**", "")
+        normalized = normalized.replace("__", "")
+
+        cleaned_lines: list[str] = []
+        for line in normalized.split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            stripped = re.sub(r"^\s*(#{1,6}\s*|[-*•]\s*)", "", stripped)
+            stripped = re.sub(r"^\s*\d+[\).]\s*", "", stripped)
+            stripped = re.sub(r"\s{2,}", " ", stripped).strip()
+            if stripped:
+                cleaned_lines.append(stripped)
+
+        cleaned = "\n".join(cleaned_lines).strip()
+        if not cleaned:
+            return ""
+
+        if max_sentences is not None and max_sentences > 0:
+            sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+            trimmed = [sentence.strip() for sentence in sentences if sentence.strip()]
+            if trimmed:
+                cleaned = " ".join(trimmed[:max_sentences])
+
+        return cleaned
 
     def _validate_month(self, month: str) -> None:
         try:
@@ -1014,15 +1077,15 @@ class ESGWorkflowService:
                 )
             ]
 
-        priority_score = {"low": 1, "medium": 2, "high": 3}
-        updated_scores: dict[str, int] = {}
-        reasons: dict[str, str] = {}
+        priority_score: dict[FocusPriority, int] = {"low": 1, "medium": 2, "high": 3}
+        updated_scores: dict[FocusAreaName, int] = {}
+        reasons: dict[FocusAreaName, str] = {}
 
         for item in existing_focus:
-            area = item.get("area")
-            if not area:
+            area = self._parse_focus_area(item.get("area"))
+            if area is None:
                 continue
-            current_priority = item.get("priority", "medium")
+            current_priority = self._parse_priority(item.get("priority"))
             updated_scores[area] = priority_score.get(current_priority, 2)
             reasons[area] = item.get("reason", "")
 
@@ -1050,6 +1113,7 @@ class ESGWorkflowService:
         refreshed: list[FocusArea] = []
 
         for area, score in ranked[:4]:
+            priority: FocusPriority
             if score >= 4:
                 priority = "high"
             elif score >= 2:
@@ -1066,6 +1130,31 @@ class ESGWorkflowService:
             )
 
         return refreshed
+
+    @staticmethod
+    def _parse_focus_area(value: Any) -> FocusAreaName | None:
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().lower()
+        if normalized in {
+            "energy",
+            "emissions",
+            "waste",
+            "workforce",
+            "governance",
+            "data_foundation",
+            "supply_chain",
+        }:
+            return cast(FocusAreaName, normalized)
+        return None
+
+    @staticmethod
+    def _parse_priority(value: Any) -> FocusPriority:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"low", "medium", "high"}:
+                return cast(FocusPriority, normalized)
+        return "medium"
 
     def _next_actions_from_changes(self, changes: dict[str, Any]) -> list[str]:
         actions = []

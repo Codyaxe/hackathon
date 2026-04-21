@@ -8,6 +8,7 @@ import Badge from '../components/ui/Badge';
 import { useThemeStore } from '../stores/themeStore';
 import { getStoredCompanyProfile } from '../lib/companyProfile';
 import { generatePlan } from '../lib/workflowApi';
+import { formatAiText } from '../lib/aiText';
 import type { ESGPlanResponse } from '../types/workflow';
 
 const reports = [
@@ -63,6 +64,9 @@ export default function Reports() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
+  const formattedPlanSummary = generatedPlan
+    ? formatAiText(generatedPlan.one_page_summary)
+    : '';
 
   const handleGeneratePlan = async () => {
     try {
@@ -123,8 +127,8 @@ export default function Reports() {
                   <Badge variant="sage">Live</Badge>
                 </div>
 
-                <p className={`text-sm leading-relaxed ${isDark ? 'text-white/70' : 'text-[#3a4d63]'}`}>
-                  {generatedPlan.one_page_summary}
+                <p className={`text-sm leading-relaxed whitespace-pre-line ${isDark ? 'text-white/70' : 'text-[#3a4d63]'}`}>
+                  {formattedPlanSummary}
                 </p>
 
                 <div className="space-y-2">
@@ -148,7 +152,7 @@ export default function Reports() {
                     {generatedPlan.actions.map((action) => (
                       <div key={action.title} className={`rounded-lg p-3 ${isDark ? 'bg-white/5' : 'bg-[#f4f6f9]'}`}>
                         <p className={`text-sm font-medium ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>{action.title}</p>
-                        <p className={`text-xs mt-1 ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>{action.success_metric}</p>
+                        <p className={`text-xs mt-1 whitespace-pre-line ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>{formatAiText(action.success_metric)}</p>
                       </div>
                     ))}
                   </div>
