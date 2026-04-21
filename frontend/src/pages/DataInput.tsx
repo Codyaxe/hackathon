@@ -1,5 +1,4 @@
 import { useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Upload, FileText, Image, Table, X, Check } from 'lucide-react';
 
@@ -7,7 +6,6 @@ import AppLayout from '../components/layout/AppLayout';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Card from '../components/ui/Card';
-import EmptyState from '../components/ui/EmptyState';
 import { useThemeStore } from '../stores/themeStore';
 import { getStoredCompanyProfile } from '../lib/companyProfile';
 import { formatAiText } from '../lib/aiText';
@@ -50,7 +48,6 @@ function formatFileSize(bytes: number): string {
 }
 
 export default function DataInput() {
-  const navigate = useNavigate();
   const profile = useMemo(() => getStoredCompanyProfile(), []);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -132,20 +129,6 @@ export default function DataInput() {
   return (
     <AppLayout title="Data Input" subtitle="Upload ESG source files for extraction">
       <div className="space-y-6">
-        <Card className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div>
-            <h3 className={`font-display text-base ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>
-              Monthly Checkup Is Separate Now
-            </h3>
-            <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>
-              Use the new Monthly Checkup menu item to submit month-by-month ESG updates.
-            </p>
-          </div>
-          <Button variant="outline" onClick={() => navigate('/monthly-checkup')}>
-            Open Monthly Checkup
-          </Button>
-        </Card>
-
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -205,7 +188,7 @@ export default function DataInput() {
             </div>
           )}
 
-          {selectedFiles.length > 0 ? (
+          {selectedFiles.length > 0 && (
             <Card className="space-y-3">
               <h3 className={`font-display ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>Selected Files</h3>
               {selectedFiles.map((item, index) => (
@@ -238,12 +221,6 @@ export default function DataInput() {
                 </div>
               ))}
             </Card>
-          ) : (
-            <EmptyState
-              title="No files selected"
-              description="Upload your energy bills, fuel invoices, or expense reports to get started."
-              action={{ label: 'Upload Files', onClick: () => fileInputRef.current?.click() }}
-            />
           )}
 
           {uploadResult && (

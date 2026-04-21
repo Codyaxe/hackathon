@@ -27,7 +27,7 @@ export default function QuickActions({ quickWins = [], isLoading = false }: Quic
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.5 }}
-        className="grid grid-cols-2 lg:grid-cols-4 gap-3"
+        className="grid grid-cols-2 lg:grid-cols-3 gap-3"
       >
         {actions.map((action, index) => (
           <motion.button

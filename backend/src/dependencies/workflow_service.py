@@ -542,6 +542,22 @@ class ESGWorkflowService:
             DashboardKPI.model_validate(item)
             for item in dashboard_snapshot.get("kpis", [])
         ]
+
+        # If no dashboard snapshot yet, build initial KPIs from latest extraction
+        if not kpis and extractions:
+            latest_extraction = extractions[-1] if extractions else {}
+            fixed_metrics = latest_extraction.get("fixed_extraction")
+            computations = latest_extraction.get("computations", {})
+
+            if fixed_metrics and computations:
+                initial_dashboard = self._build_dashboard_from_results(
+                    FixedExtractionMetrics.model_validate(fixed_metrics), computations
+                )
+                kpis = [
+                    DashboardKPI.model_validate(item)
+                    for item in initial_dashboard.get("kpis", [])
+                ]
+
         esg_score = self._to_float(dashboard_snapshot.get("esg_score"))
         if esg_score is None:
             esg_score = completion
