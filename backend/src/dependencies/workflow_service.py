@@ -140,12 +140,22 @@ class ESGWorkflowService:
             "a reliable monthly data baseline for future reporting."
         )
         plan_prompt = (
-            "Write a concise one-page ESG action summary for an SME. Keep it friendly and practical. "
-            "Use plain language, no jargon, no tables.\n\n"
+            "You are generating a structured ESG action plan. Output ONLY the plan — no preamble, no closing remarks. Do not invent any information not provided.\n\n"
+            f"Company: {profile.get('company_name', 'This company')}\n"
             f"Industry: {profile.get('industry', 'Unknown')}\n"
-            f"Company size: {profile.get('employee_count', 'Unknown')} employees\n"
-            f"Themes: {selected_themes}\n"
-            f"Actions: {[action.model_dump() for action in actions]}"
+            f"Employees: {profile.get('employee_count', 'Unknown')}\n"
+            f"Focus areas: {', '.join(selected_themes)}\n\n"
+            "For each action below, output exactly this format:\n"
+            "## [title]\n"
+            "**Why it matters:** [why_it_matters]\n"
+            "**Owner:** [owner]\n"
+            "**Done when:** [success_metric]\n"
+            "**Timeline:** [timeline_weeks] weeks\n\n"
+            "Actions:\n"
+            + "\n".join(
+                f"- {a.title} | {a.why_it_matters} | owner: {a.owner} | metric: {a.success_metric} | weeks: {a.timeline_weeks}"
+                for a in actions
+            )
         )
         one_page_summary = await self._safe_ai_summary(plan_prompt, fallback_summary)
 
