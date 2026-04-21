@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from fastapi import Depends, FastAPI, File, Form, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from google import genai  # The new 2026 SDK
 
@@ -39,7 +40,8 @@ load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.ai = genai.Client(api_key=os.environ.get("GEMINI_API_KEY")).aio
+    api_key = os.environ.get("GEMINI_API_KEY")
+    app.state.ai = genai.Client(api_key=api_key).aio if api_key else None
     app.state.GRI302Engine = GRIEngine(GRI_302_FUNCTIONS, GRI_302_REQUIREMENTS)
     app.state.GRI305Engine = GRIEngine(GRI_305_FUNCTIONS, GRI_305_REQUIREMENTS)
     app.state.GRI401Engine = GRIEngine(GRI_401_FUNCTIONS, GRI_401_REQUIREMENTS)
@@ -51,6 +53,17 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # initial assumption of structure

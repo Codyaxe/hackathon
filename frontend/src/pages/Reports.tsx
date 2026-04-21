@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { FileText, Download, Calendar, Clock } from 'lucide-react';
 import AppLayout from '../components/layout/AppLayout';
@@ -5,6 +6,9 @@ import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import { useThemeStore } from '../stores/themeStore';
+import { getStoredCompanyProfile } from '../lib/companyProfile';
+import { generatePlan } from '../lib/workflowApi';
+import type { ESGPlanResponse } from '../types/workflow';
 
 const reports = [
   {
@@ -53,8 +57,25 @@ const typeColors: Record<string, 'sage' | 'sand' | 'forest' | 'slate'> = {
 };
 
 export default function Reports() {
+  const company = useMemo(() => getStoredCompanyProfile(), []);
+  const [generatedPlan, setGeneratedPlan] = useState<ESGPlanResponse | null>(null);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
+
+  const handleGeneratePlan = async () => {
+    try {
+      setIsGeneratingPlan(true);
+      setErrorMessage(null);
+      const plan = await generatePlan(company.companyId, 90);
+      setGeneratedPlan(plan);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not generate ESG plan.');
+    } finally {
+      setIsGeneratingPlan(false);
+    }
+  };
 
   return (
     <AppLayout title="Reports" subtitle="Generate and download ESG reports">
@@ -71,14 +92,70 @@ export default function Reports() {
               </div>
               <div>
                 <h3 className={`font-display ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>Generate New Report</h3>
-                <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>Create a custom ESG report based on your data</p>
+                <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>Create a one-page ESG action plan based on onboarding and uploads</p>
               </div>
             </div>
-            <Button icon={<FileText className="w-4 h-4" />}>
-              Create Report
+              <Button icon={<FileText className="w-4 h-4" />} onClick={handleGeneratePlan} loading={isGeneratingPlan}>
+                Generate ESG Plan
             </Button>
           </Card>
         </motion.div>
+
+          {errorMessage && (
+            <div className={`rounded-lg p-3 text-sm ${isDark ? 'bg-red-500/10 text-red-300' : 'bg-red-50 text-red-600'}`}>
+              {errorMessage}
+            </div>
+          )}
+
+          {generatedPlan && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <Card className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className={`font-display text-lg ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>Auto-generated ESG Plan</h3>
+                    <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>
+                      Generated {new Date(generatedPlan.generated_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <Badge variant="sage">Live</Badge>
+                </div>
+
+                <p className={`text-sm leading-relaxed ${isDark ? 'text-white/70' : 'text-[#3a4d63]'}`}>
+                  {generatedPlan.one_page_summary}
+                </p>
+
+                <div className="space-y-2">
+                  <h4 className={`font-medium ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>Priority Themes</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {generatedPlan.priority_themes.map((theme) => (
+                      <span
+                        key={theme}
+                        className="px-2 py-1 text-xs rounded-full text-white"
+                        style={{ background: 'linear-gradient(135deg, #2d9e6b 0%, #1B4332 100%)' }}
+                      >
+                        {theme.replaceAll('_', ' ')}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <h4 className={`font-medium ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>Action Items</h4>
+                  <div className="space-y-2">
+                    {generatedPlan.actions.map((action) => (
+                      <div key={action.title} className={`rounded-lg p-3 ${isDark ? 'bg-white/5' : 'bg-[#f4f6f9]'}`}>
+                        <p className={`text-sm font-medium ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>{action.title}</p>
+                        <p className={`text-xs mt-1 ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>{action.success_metric}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+            </motion.div>
+          )}
 
         {/* Report List */}
         <div className="space-y-4">

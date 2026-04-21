@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { Bell, Search, User } from 'lucide-react';
-import { company } from '../../data/mock/esg-data';
+import { getStoredCompanyProfile } from '../../lib/companyProfile';
 import { useThemeStore } from '../../stores/themeStore';
 import ThemeToggle from '../ui/ThemeToggle';
 
@@ -12,6 +12,7 @@ interface TopbarProps {
 export default function Topbar({ title, subtitle }: TopbarProps) {
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
+  const company = getStoredCompanyProfile();
 
   return (
     <motion.header
@@ -74,7 +75,7 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
         <div className={`hidden lg:flex items-center gap-3 ${isDark ? 'pl-4 border-l border-white/10' : 'pl-4 border-l border-[#e2e8f0]'}`}>
           <div className="text-right">
             <p className={`text-sm font-medium ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>
-              {company.name}
+              {company.companyName}
             </p>
             <p className={`text-xs ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>
               {company.industry}
