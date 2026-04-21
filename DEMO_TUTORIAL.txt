@@ -1,0 +1,299 @@
+================================================================================
+        ESG HUB - DEMO TUTORIAL: Generate KPIs & Download ESG Report
+================================================================================
+
+OVERVIEW:
+This tutorial walks you through the complete workflow to see KPI data and
+download an ESG report in the application.
+
+================================================================================
+STEP 1: START THE APPLICATION
+================================================================================
+
+1. Open two terminals in the workspace root
+
+TERMINAL A - BACKEND:
+  cd backend
+  .\.venv\Scripts\python.exe main.py
+  
+  Expected output:
+    INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+    INFO:     Application startup complete.
+
+TERMINAL B - FRONTEND:
+  cd frontend
+  npm run dev
+  
+  Expected output:
+    VITE v... ready in ... ms
+    ➜  Local:   http://localhost:5173/
+    
+2. Open browser at http://localhost:5173/
+
+================================================================================
+STEP 2: LOGIN & COMPLETE ONBOARDING
+================================================================================
+
+On the Landing Page:
+  - Click "Sign In" button
+  - Use any credentials (demo mode accepts all logins)
+  - You'll be redirected to Dashboard
+
+On the Dashboard:
+  - You'll see an "Onboarding Card" prompt
+  - Click "Start Onboarding" (or "Begin Setup")
+  - Answer all the onboarding questions:
+    * Company Name: "Apex Manufacturing Co" (or any name)
+    * Industry: "Manufacturing"
+    * Employee Count: "500"
+    * Focus Areas: Select "Energy", "Emissions", "Waste"
+  - Click "Complete Onboarding"
+  - Wait ~2-3 seconds for processing
+  - You should see a success message
+
+================================================================================
+STEP 3: UPLOAD DATA FILES TO GENERATE KPIs
+================================================================================
+
+Now go to "Data Input" from the sidebar:
+
+1. Drag & drop or browse and select sample files:
+   - Energy bill (PDF or XLSX recommended)
+   - Fuel invoice (PDF or image)
+   - Waste report (CSV or XLSX)
+   
+   Note: You can use ANY files for demo - the AI extraction will attempt
+         to find energy/emissions/waste metrics even from unrelated docs
+
+2. (Optional) Add notes in "Notes for extraction":
+   Example: "This contains Q1 2026 energy costs and waste data"
+
+3. Click "Upload & Extract Metrics"
+
+4. Wait for extraction to complete (5-10 seconds)
+   
+   Expected output in "Extraction Result" section:
+     - AI Summary of what was extracted
+     - List of detected metrics (Total Energy, Emissions, etc.)
+
+5. Go back to Dashboard (click Dashboard in sidebar)
+
+IMPORTANT: You should now see:
+  ✓ ESG Score card showing a percentage (0-100)
+  ✓ Compliance Status card (On Track / Needs Attention)
+  ✓ "Key Performance Indicators" section with a GRID showing:
+    - Total Energy (MJ) with Good/Better/Best rating
+    - Scope 1 Emissions (kg CO2e) with rating
+    - Scope 2 Emissions (kg CO2e) with rating
+    - Waste Generated (kg) with rating
+    - New Hire Rate (%) with rating
+    - Turnover Rate (%) with rating
+    - GRI Coverage (%) with rating
+
+  Each KPI card shows:
+    - KPI Name
+    - Value with unit
+    - Color-coded rating badge (Good=tan, Better=dark green, Best=bright green)
+
+================================================================================
+STEP 4: GENERATE ONE PLAN (Optional - shows action items)
+================================================================================
+
+Click "Generate One Plan" (Zap icon ⚡) in Quick Actions or sidebar:
+
+1. Click "Generate Plan" button
+2. Wait 3-5 seconds
+3. See your one-page ESG action plan with:
+   - Priority themes
+   - Recommended actions
+   - Monthly check-in questions
+   - KPIs to track
+
+This shows the "One Plan" output mentioned in the reports.
+
+================================================================================
+STEP 5: VIEW & DOWNLOAD ESG REPORT
+================================================================================
+
+This is the main feature - click "Open ESG Report" (FileText icon 📄) 
+in Quick Actions or sidebar:
+
+WHAT YOU'LL SEE:
+
+A. Report Header:
+   - Generated date/time
+   - Company name
+
+B. GRI DISCLOSURES SECTION (the core ESG data):
+   
+   Each disclosure shows:
+   - Disclosure ID (e.g., "GRI 302-1: Energy Consumption")
+   - Title
+   - Computed value (if extracted from your data)
+     Example: "Total Energy: 450,000 MJ"
+   - Rating badge showing coverage
+   
+   Common disclosures shown:
+   ✓ GRI 302-1: Energy Consumption (Total Energy MJ)
+   ✓ GRI 302-3: Energy Intensity (Energy per employee)
+   ✓ GRI 305-1: Scope 1 Emissions (kg CO2e)
+   ✓ GRI 305-2: Scope 2 Emissions (kg CO2e)
+   ✓ GRI 305-4: GHG Reduction (kg CO2e reduced)
+   ✓ GRI 401-1: Workforce Metrics (new hires, turnover rates)
+   ✓ GRI 306-3: Waste Generation (kg)
+   ✓ GRI 306-4: Waste Diversion (kg recycled)
+
+C. OMISSION REASONS (shows any data gaps):
+   If a disclosure couldn't be computed, it will show:
+   - "Reason for Omission: Data not provided in upload"
+   - This is normal if you uploaded unrelated test files
+
+D. EVIDENCE FILES SECTION (if files were tagged):
+   Shows uploaded files associated with each disclosure
+   With disclosure tags and file sizes
+
+E. DOWNLOAD BUTTON:
+   
+   At the top of the report page:
+   - Click "Download PDF" button
+   - A PDF file will download: esg_report_[company_id].pdf
+   
+   The PDF contains:
+   ✓ All GRI disclosures with values
+   ✓ Omission reasons
+   ✓ Generated timestamp
+   ✓ Company information
+   ✓ Professional formatting
+
+================================================================================
+STEP 6: VERIFY DATA PERSISTENCE
+================================================================================
+
+1. Refresh the browser (F5)
+2. Go back to Dashboard - KPIs should still be there
+3. Go back to ESG Report - data should still be there
+4. Download the PDF again - should work consistently
+
+This confirms data is being persisted in workflow_data.json
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Issue: "502 Bad Gateway" or "Failed to load data"
+  → Make sure backend is running (Terminal A showing "Uvicorn running...")
+  → Try refreshing the page
+
+Issue: Dashboard is empty, no KPIs showing
+  → Complete onboarding first
+  → Upload at least one file and extract metrics
+  → Refresh dashboard after extraction completes
+
+Issue: ESG Report shows "Company not found"
+  → Make sure you completed onboarding
+  → Make sure you're using the same company ID
+
+Issue: "No files selected" message keeps appearing
+  → This section was removed - you should NOT see it
+  → If you do, refresh the page
+
+Issue: Download PDF not working
+  → Check browser console for errors (F12)
+  → Make sure backend is running
+  → Try downloading again
+
+================================================================================
+KEY FEATURES TO TEST
+================================================================================
+
+✓ Dashboard displays real KPI data
+✓ ESG Report shows 8 GRI disclosures with computed values
+✓ PDF downloads with proper formatting
+✓ Data persists after page refresh
+✓ Different compliance statuses (On Track vs Needs Attention)
+✓ Color-coded KPI ratings (Good/Better/Best)
+✓ Responsive design (try on mobile with responsive tool)
+
+================================================================================
+EXPECTED RESULTS
+================================================================================
+
+After following this tutorial, you should see:
+
+DASHBOARD:
+  - ESG Score: 0-100 (based on data coverage)
+  - Compliance Status: On Track / Needs Attention
+  - KPI Grid: 3-8 performance indicators with ratings
+  - Quick Wins: Cost savings recommendations with ₱ amounts
+
+ONE PLAN PAGE:
+  - Executive summary
+  - 3-5 priority themes
+  - 5-10 actionable items with timelines
+  - Monthly check-in questions
+
+ESG REPORT:
+  - 8 GRI disclosures (energy, emissions, workforce, waste)
+  - Computed values from your extracted data
+  - Omission reasons for missing data
+  - Downloadable PDF report
+
+================================================================================
+API ENDPOINTS BEING CALLED (Behind the scenes)
+================================================================================
+
+POST /workflow/onboarding/{company_id}
+  → Stores onboarding answers and generates focus areas
+
+POST /upload/{company_id}
+  → Uploads files and extracts metrics using AI
+
+GET /workflow/progress/{company_id}
+  → Fetches dashboard data (ESG score, KPIs, compliance status)
+
+POST /workflow/generate-plan/{company_id}
+  → Generates one-page plan from onboarding + uploads
+
+GET /workflow/report/{company_id}
+  → Fetches ESG report with GRI disclosures
+
+GET /workflow/report/{company_id}/pdf
+  → Downloads ESG report as PDF
+
+GET /evidence/{company_id}
+  → Fetches list of uploaded evidence files
+
+================================================================================
+NOTES FOR DEVELOPERS
+================================================================================
+
+1. KPI Grid Data Flow:
+   Upload → Extraction → GRI Engine Computation → Dashboard KPIs stored
+   
+2. Report PDF Generation:
+   Uses a simple text-based PDF library (ReportLab in backend)
+   Future: Could upgrade to more advanced formatting
+
+3. Evidence Persistence:
+   Files stored in: backend/evidence/ directory
+   Metadata stored in: backend/workflow_data.json
+
+4. GRI Standards Supported:
+   - GRI 302: Energy
+   - GRI 305: Emissions
+   - GRI 401: Workforce
+   - GRI 306: Waste (computed from extractions)
+
+5. Backend Endpoints are RESTful and can be tested with:
+   curl http://localhost:8000/workflow/progress/apex-manufacturing-co
+
+================================================================================
+END OF TUTORIAL
+================================================================================
+
+For questions or issues, check:
+- Backend logs in Terminal A for API errors
+- Browser console (F12) for frontend errors
+- workflow_data.json to verify data storage
+
+Happy testing! 🚀
