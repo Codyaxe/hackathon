@@ -73,15 +73,20 @@ export default function MonthlyCheckup() {
     try {
       setIsSubmittingMonthly(true);
       setMonthlyError(null);
-      const payload = {
-        company_id: profile.companyId,
-        month,
-        changes: monthlyAnswers,
-        notes: monthlyNotes || undefined,
-      };
       const response = monthlyFiles.length > 0
-        ? await submitMonthlyUpdateWithFiles(payload, monthlyFiles)
-        : await submitMonthlyUpdate(payload);
+        ? await submitMonthlyUpdateWithFiles(
+            profile.companyId,
+            month,
+            monthlyAnswers,
+            monthlyFiles,
+            monthlyNotes || undefined
+          )
+        : await submitMonthlyUpdate(
+            profile.companyId,
+            month,
+            monthlyAnswers,
+            monthlyNotes || undefined
+          );
       setMonthlyResult(response);
     } catch (error) {
       setMonthlyError(error instanceof Error ? error.message : 'Could not submit monthly update.');

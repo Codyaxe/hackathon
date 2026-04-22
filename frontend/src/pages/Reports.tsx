@@ -39,7 +39,7 @@ export default function Reports() {
         getEvidenceFiles(company.companyId),
       ]);
       setReport(reportResponse);
-      setEvidenceFiles(evidenceResponse.evidence_files);
+      setEvidenceFiles(evidenceResponse);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Could not load ESG report.');
     } finally {
@@ -159,7 +159,11 @@ export default function Reports() {
                     </div>
                     <p className={`text-xs mt-1 ${isDark ? 'text-white/70' : 'text-[#3a4d63]'}`}>
                       {item.computed
-                        ? `${formatAiText(String(item.value ?? ''))} ${item.unit ?? ''}`.trim()
+                        ? `${formatAiText(String(
+                            typeof item.value === 'object' && item.value !== null
+                              ? Object.values(item.value)[0]
+                              : item.value ?? ''
+                          ))} ${item.unit ?? ''}`.trim()
                         : formatAiText(item.reason_for_omission ?? 'Not enough data.')}
                     </p>
                   </div>

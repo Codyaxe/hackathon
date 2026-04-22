@@ -75,7 +75,7 @@ export default function Dashboard() {
     }
 
     if (quickWinsResult.status === 'fulfilled') {
-      setQuickWins(quickWinsResult.value.quick_wins);
+      setQuickWins(quickWinsResult.value);
     } else if (!quickWinsResult.reason?.message?.includes('Company not found')) {
       setApiError(quickWinsResult.reason instanceof Error ? quickWinsResult.reason.message : 'Could not load quick wins.');
     }

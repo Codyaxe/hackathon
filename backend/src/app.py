@@ -78,6 +78,8 @@ async def get_esg_report(
     inputs: ExtractionPromptSchema, services: Services = Depends(Services)
 ) -> dict:
 
+    print("EXTRACTING")
+
     extracted_data: ExtractedData = await services.ai_extract_data(inputs)
 
     if extracted_data.detected_gri == "GRI_302":
