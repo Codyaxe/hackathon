@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { NavLink } from 'react-router-dom';
 import {
+  Calendar,
   LayoutDashboard,
   FileInput,
   FileText,
@@ -14,6 +15,7 @@ import { useThemeStore } from '../../stores/themeStore';
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/data-input', icon: FileInput, label: 'Data Input' },
+  { to: '/monthly-checkup', icon: Calendar, label: 'Monthly Checkup' },
   { to: '/one-plan', icon: Zap, label: 'One Plan' },
   { to: '/reports', icon: FileText, label: 'ESG Report' },
   { to: '/response-library', icon: Library, label: 'Response Library' },

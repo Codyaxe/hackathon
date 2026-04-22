@@ -3,6 +3,7 @@ import { type ReactNode } from 'react';
 
 import Dashboard from './pages/Dashboard';
 import DataInput from './pages/DataInput';
+import MonthlyCheckup from './pages/MonthlyCheckup';
 import OnePlan from './pages/OnePlan';
 import Reports from './pages/Reports';
 import ResponseLibrary from './pages/ResponseLibrary';
@@ -29,6 +30,11 @@ export default function App() {
         <Route path="/data-input" element={
           <ProtectedRoute>
             <DataInput />
+          </ProtectedRoute>
+        } />
+        <Route path="/monthly-checkup" element={
+          <ProtectedRoute>
+            <MonthlyCheckup />
           </ProtectedRoute>
         } />
         <Route path="/reports" element={
