@@ -338,9 +338,16 @@ class ESGWorkflowService:
                             )
                         )
                     )
-                file_parts.append(
-                    types.Part.from_bytes(data=binary, mime_type=media_type)
-                )
+                else:
+                    file_parts.append(
+                        types.Part.from_text(
+                            text=(
+                                f"Spreadsheet: {record.filename}\n"
+                                "Unable to parse spreadsheet preview locally. "
+                                "Proceeding without raw spreadsheet bytes because this MIME type is not accepted by Gemini content API."
+                            )
+                        )
+                    )
             else:
                 file_parts.append(
                     types.Part.from_bytes(data=binary, mime_type=media_type)
@@ -422,6 +429,23 @@ class ESGWorkflowService:
         entries_raw = self.repo.get_library_entries(company_id, limit=limit)
         entries = [ResponseLibraryEntry.model_validate(item) for item in entries_raw]
         return ResponseLibraryResponse(company_id=company_id, entries=entries)
+
+    def reset_reporting_artifacts(self, company_id: str) -> dict[str, Any]:
+        company_data = self.repo.get_company_data(company_id)
+        if not company_data:
+            raise HTTPException(
+                status_code=404, detail="Company not found. Complete onboarding first."
+            )
+
+        updated = self.repo.reset_reporting_artifacts(company_id)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Company not found.")
+
+        return {
+            "company_id": company_id,
+            "status": "reset",
+            "message": "GRI disclosures, KPI snapshots, and submission artifacts were reset.",
+        }
 
     def list_evidence(self, company_id: str) -> EvidenceListResponse:
         company_data = self.repo.get_company_data(company_id)

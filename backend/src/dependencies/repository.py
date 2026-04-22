@@ -276,3 +276,33 @@ class ESGRepository:
         entries = list(record.get("library", []))
         entries.reverse()
         return entries[:limit]
+
+    def reset_reporting_artifacts(self, company_id: str) -> dict[str, Any] | None:
+        data = self._load()
+        company_record = data.get("companies", {}).get(company_id)
+        if not company_record:
+            return None
+
+        company_record["uploads"] = []
+        company_record["extractions"] = []
+        company_record["monthly_updates"] = []
+        company_record["submissions"] = []
+        company_record["latest_dashboard"] = {}
+        company_record["latest_report"] = {}
+
+        plan = company_record.get("plan")
+        if isinstance(plan, dict) and plan:
+            plan["kpis"] = []
+            plan["ready_for_pdf"] = False
+
+        library_entries = company_record.get("library", [])
+        if isinstance(library_entries, list):
+            company_record["library"] = [
+                item
+                for item in library_entries
+                if item.get("entry_type") not in {"upload_extraction", "monthly_update"}
+            ]
+
+        company_record["updated_at"] = self.utc_now_iso()
+        self._save(data)
+        return deepcopy(company_record)

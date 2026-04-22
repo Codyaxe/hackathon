@@ -184,6 +184,14 @@ def get_response_library(
     return workflow.get_response_library(company_id, limit)
 
 
+@app.post("/workflow/reset/{company_id}")
+def reset_workflow_artifacts(
+    company_id: str,
+    workflow: ESGWorkflowService = Depends(ESGWorkflowService),
+) -> dict[str, str]:
+    return workflow.reset_reporting_artifacts(company_id)
+
+
 @app.get("/workflow/progress/{company_id}", response_model=ProgressTrackerResponse)
 def get_progress_tracker(
     company_id: str,
