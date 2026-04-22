@@ -14,9 +14,10 @@ const actions = [
 interface QuickActionsProps {
   quickWins?: QuickWinItem[];
   isLoading?: boolean;
+  requiresMonthlyData?: boolean;
 }
 
-export default function QuickActions({ quickWins = [], isLoading = false }: QuickActionsProps) {
+export default function QuickActions({ quickWins = [], isLoading = false, requiresMonthlyData = false }: QuickActionsProps) {
   const navigate = useNavigate();
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
@@ -61,12 +62,19 @@ export default function QuickActions({ quickWins = [], isLoading = false }: Quic
         </div>
         {isLoading ? (
           <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>Loading recommendations...</p>
+        ) : requiresMonthlyData ? (
+          <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>
+            Submit your monthly checkup first to unlock quick-win recommendations.
+          </p>
         ) : quickWins.length === 0 ? (
           <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>
             Upload evidence files first to get AI-generated quick-win recommendations.
           </p>
         ) : (
           <div className="space-y-3">
+            <p className={`text-xs ${isDark ? 'text-white/45' : 'text-[#6b7c93]'}`}>
+              Amounts shown are estimated cost savings in PHP.
+            </p>
             {quickWins.slice(0, 3).map((item) => (
               <div
                 key={item.title}
@@ -75,9 +83,14 @@ export default function QuickActions({ quickWins = [], isLoading = false }: Quic
                 <div className="flex items-start justify-between mb-1">
                   <p className={`text-sm font-medium ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>{item.title}</p>
                   {item.estimated_cost_savings_php && (
-                    <span className="text-xs font-semibold" style={{ color: '#2d9e6b' }}>
-                      ₱{item.estimated_cost_savings_php.toLocaleString()}
-                    </span>
+                    <div className="text-right">
+                      <p className="text-[10px] uppercase tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.45)' : '#6b7c93' }}>
+                        Est. savings
+                      </p>
+                      <span className="text-xs font-semibold" style={{ color: '#2d9e6b' }}>
+                        ₱{item.estimated_cost_savings_php.toLocaleString()}
+                      </span>
+                    </div>
                   )}
                 </div>
                 <p className={`text-xs mt-1 ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>{item.first_step}</p>

@@ -7,7 +7,7 @@ import QuickActions from '../components/dashboard/QuickActions';
 import EnergyLineChart from '../components/charts/EnergyLineChart';
 import CarbonBarChart from '../components/charts/CarbonBarChart';
 import WasteDonutChart from '../components/charts/WasteDonutChart';
-import { energyData, carbonData } from '../data/mock/esg-data';
+import { energyData, carbonData, wasteData } from '../data/mock/esg-data';
 import type { ScoreCard } from '../types/esg';
 import { useThemeStore } from '../stores/themeStore';
 import { getStoredCompanyProfile } from '../lib/companyProfile';
@@ -96,6 +96,7 @@ export default function Dashboard() {
   const recentFiles = useMemo(() => parseRecentFiles(libraryEntries), [libraryEntries]);
   const completion = progress?.completion_percentage ?? 0;
   const hasCompletedOnboarding = progress?.steps.find((step) => step.step_id === 'onboarding')?.completed ?? false;
+  const hasMonthlyData = progress?.steps.find((step) => step.step_id === 'monthly_update')?.completed ?? false;
   
   // Build metrics from real ESG data
   const esgScore = progress?.esg_score ?? Math.round(completion);
@@ -131,7 +132,11 @@ export default function Dashboard() {
         )}
 
         {/* Quick Actions */}
-        <QuickActions quickWins={quickWins} isLoading={isLoadingInsights} />
+        <QuickActions
+          quickWins={hasMonthlyData ? quickWins : []}
+          isLoading={isLoadingInsights}
+          requiresMonthlyData={!hasMonthlyData}
+        />
 
         {apiError && (
           <div className={`rounded-lg p-3 text-sm ${isDark ? 'bg-red-500/10 text-red-300' : 'bg-red-50 text-red-600'}`}>
@@ -188,13 +193,13 @@ export default function Dashboard() {
 
         {/* Charts Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <EnergyLineChart data={energyData} />
-          <CarbonBarChart data={carbonData} />
+          <EnergyLineChart data={hasMonthlyData ? energyData : []} />
+          <CarbonBarChart data={hasMonthlyData ? carbonData : []} />
         </div>
 
         {/* Bottom Row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <WasteDonutChart />
+          <WasteDonutChart data={hasMonthlyData ? wasteData : []} />
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}

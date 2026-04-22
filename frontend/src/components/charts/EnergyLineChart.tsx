@@ -38,6 +38,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 export default function EnergyLineChart({ data }: EnergyLineChartProps) {
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
+  const hasData = data.length > 0;
 
   const gridColor = isDark ? 'rgba(255,255,255,0.06)' : '#e2e8f0';
   const textColor = isDark ? 'rgba(255,255,255,0.4)' : '#9ca3af';
@@ -60,38 +61,46 @@ export default function EnergyLineChart({ data }: EnergyLineChartProps) {
         </p>
       </div>
       <div className="h-72">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-            <defs>
-              <linearGradient id="energyGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#2d9e6b" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#2d9e6b" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
-            <XAxis
-              dataKey="month"
-              axisLine={false}
-              tickLine={false}
-              tick={{ fill: textColor, fontSize: 12 }}
-            />
-            <YAxis
-              axisLine={false}
-              tickLine={false}
-              tick={{ fill: textColor, fontSize: 12 }}
-              tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
-            />
-            <Tooltip content={<CustomTooltip />} />
-            <Area
-              type="monotone"
-              dataKey="kWh"
-              stroke="#2d9e6b"
-              strokeWidth={2}
-              fill="url(#energyGradient)"
-              animationDuration={1500}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+        {hasData ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+              <defs>
+                <linearGradient id="energyGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#2d9e6b" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#2d9e6b" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
+              <XAxis
+                dataKey="month"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: textColor, fontSize: 12 }}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: textColor, fontSize: 12 }}
+                tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Area
+                type="monotone"
+                dataKey="kWh"
+                stroke="#2d9e6b"
+                strokeWidth={2}
+                fill="url(#energyGradient)"
+                animationDuration={1500}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="h-full flex items-center justify-center">
+            <p className={`text-sm text-center ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>
+              No monthly energy data yet. Submit a monthly checkup to populate this chart.
+            </p>
+          </div>
+        )}
       </div>
     </motion.div>
   );
