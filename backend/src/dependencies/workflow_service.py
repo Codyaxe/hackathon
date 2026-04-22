@@ -16,6 +16,22 @@ from fastapi import HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from google.genai import types
 from pydantic import BaseModel, Field
+from reportlab.lib import colors  # type: ignore[import-not-found]
+from reportlab.lib.pagesizes import A4  # type: ignore[import-not-found]
+from reportlab.lib.styles import (  # type: ignore[import-not-found]
+    ParagraphStyle,
+    getSampleStyleSheet,
+)
+from reportlab.lib.units import mm  # type: ignore[import-not-found]
+from reportlab.platypus import (  # type: ignore[import-not-found]
+    HRFlowable,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)  # type: ignore[import-not-found]
 
 from src.dependencies.repository import ESGRepository
 from src.schemas.MetricsSchemas.GRI_302_Metrics import (
@@ -539,32 +555,7 @@ class ESGWorkflowService:
         company_data = self.repo.get_company_data(company_id) or {}
         profile = company_data.get("profile", {})
 
-        lines: list[str] = [
-            f"ESG Report - {profile.get('company_name', company_id)}",
-            f"Industry: {profile.get('industry', 'Unknown')}",
-            f"Location: {profile.get('location', 'Unknown')}",
-            f"Generated at: {report.generated_at.isoformat()}",
-            "",
-            "GRI Disclosures",
-        ]
-
-        for disclosure in report.disclosures:
-            if disclosure.computed:
-                lines.append(
-                    f"{disclosure.disclosure} {disclosure.title}: {self._stringify_report_value(disclosure.value)} {disclosure.unit or ''}".strip()
-                )
-            else:
-                lines.append(
-                    f"{disclosure.disclosure} {disclosure.title}: OMITTED - {disclosure.reason_for_omission or 'Not enough data.'}"
-                )
-
-        if report.reasons_for_omission:
-            lines.append("")
-            lines.append("Reasons for Omission")
-            for omission in report.reasons_for_omission:
-                lines.append(f"{omission.disclosure}: {omission.reason}")
-
-        pdf_bytes = self._build_simple_pdf(lines)
+        pdf_bytes = self._build_simple_pdf(report=report, profile=profile)
         filename = f"{company_id}-esg-report-{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
         return filename, pdf_bytes
 
@@ -2773,56 +2764,304 @@ class ESGWorkflowService:
     def _escape_pdf_text(value: str) -> str:
         return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
-    def _build_simple_pdf(self, lines: list[str]) -> bytes:
-        text_lines = [self._escape_pdf_text(line[:120]) for line in lines[:120]]
-        if not text_lines:
-            text_lines = ["ESG Report"]
+    def _build_simple_pdf(
+        self,
+        report: ESGReportResponse,
+        profile: dict[str, Any],
+    ) -> bytes:
+        def format_key(value: str) -> str:
+            return value.replace("_", " ").strip().title()
 
-        content_commands = ["BT", "/F1 10 Tf", "50 790 Td"]
-        first_line = True
-        for line in text_lines:
-            if first_line:
-                content_commands.append(f"({line}) Tj")
-                first_line = False
-            else:
-                content_commands.append("0 -14 Td")
-                content_commands.append(f"({line}) Tj")
-        content_commands.append("ET")
-        stream = "\n".join(content_commands).encode("latin-1", errors="replace")
+        def flatten_value(value: Any, prefix: str = "") -> list[str]:
+            if value is None:
+                return ["Not provided"]
+            if isinstance(value, dict):
+                lines: list[str] = []
+                for key, nested in value.items():
+                    label = format_key(str(key))
+                    next_prefix = (
+                        f"{prefix}{label}" if not prefix else f"{prefix} > {label}"
+                    )
+                    lines.extend(flatten_value(nested, next_prefix))
+                return lines or [
+                    f"{prefix}: Not provided" if prefix else "Not provided"
+                ]
+            if isinstance(value, list):
+                if not value:
+                    return [f"{prefix}: None" if prefix else "None"]
+                lines: list[str] = []
+                for idx, item in enumerate(value, start=1):
+                    item_prefix = f"{prefix} [{idx}]" if prefix else f"Item {idx}"
+                    lines.extend(flatten_value(item, item_prefix))
+                return lines
+            scalar = str(value)
+            return [f"{prefix}: {scalar}" if prefix else scalar]
 
-        objects: list[bytes] = [
-            b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-            b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
-            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
-            b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-            b"5 0 obj\n<< /Length "
-            + str(len(stream)).encode("ascii")
-            + b" >>\nstream\n"
-            + stream
-            + b"\nendstream\nendobj\n",
-        ]
+        def build_section_header(title: str) -> Table:
+            header = Table(
+                [[Paragraph(title, styles["section_header"])]],
+                colWidths=[170 * mm],
+            )
+            header.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0F766E")),
+                        ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                        ("TOPPADDING", (0, 0), (-1, -1), 7),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+                    ]
+                )
+            )
+            return header
 
-        pdf = bytearray(b"%PDF-1.4\n")
-        offsets: list[int] = [0]
-
-        for obj in objects:
-            offsets.append(len(pdf))
-            pdf.extend(obj)
-
-        xref_start = len(pdf)
-        pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
-        pdf.extend(b"0000000000 65535 f \n")
-        for offset in offsets[1:]:
-            pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
-
-        pdf.extend(
-            (
-                f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
-                f"startxref\n{xref_start}\n%%EOF"
-            ).encode("ascii")
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=20 * mm,
+            rightMargin=20 * mm,
+            topMargin=20 * mm,
+            bottomMargin=20 * mm,
+            title="ESG Report",
+            author="Techofusion ESG Workflow",
         )
 
-        return bytes(pdf)
+        base_styles = getSampleStyleSheet()
+        styles = {
+            "cover_title": ParagraphStyle(
+                "cover_title",
+                parent=base_styles["Title"],
+                fontName="Helvetica-Bold",
+                fontSize=28,
+                leading=34,
+                textColor=colors.HexColor("#0B132B"),
+                spaceAfter=6,
+            ),
+            "cover_claim": ParagraphStyle(
+                "cover_claim",
+                parent=base_styles["Heading2"],
+                fontName="Helvetica-Bold",
+                fontSize=16,
+                leading=20,
+                textColor=colors.HexColor("#0F766E"),
+                spaceAfter=12,
+            ),
+            "cover_meta": ParagraphStyle(
+                "cover_meta",
+                parent=base_styles["BodyText"],
+                fontName="Helvetica",
+                fontSize=11,
+                leading=16,
+                textColor=colors.HexColor("#334155"),
+            ),
+            "section_header": ParagraphStyle(
+                "section_header",
+                parent=base_styles["Heading2"],
+                fontName="Helvetica-Bold",
+                fontSize=12,
+                leading=14,
+            ),
+            "table_header": ParagraphStyle(
+                "table_header",
+                parent=base_styles["BodyText"],
+                fontName="Helvetica-Bold",
+                fontSize=10,
+                leading=12,
+                textColor=colors.white,
+            ),
+            "table_body": ParagraphStyle(
+                "table_body",
+                parent=base_styles["BodyText"],
+                fontName="Helvetica",
+                fontSize=9,
+                leading=12,
+                textColor=colors.HexColor("#0F172A"),
+            ),
+            "table_muted": ParagraphStyle(
+                "table_muted",
+                parent=base_styles["BodyText"],
+                fontName="Helvetica",
+                fontSize=9,
+                leading=12,
+                textColor=colors.HexColor("#475569"),
+            ),
+        }
+
+        company_name = str(profile.get("company_name") or report.company_id)
+        industry = str(profile.get("industry") or "Unknown")
+        location = str(profile.get("location") or "Unknown")
+        generated_date = report.generated_at.strftime("%B %d, %Y")
+
+        story: list[Any] = []
+
+        # Cover page
+        story.append(Spacer(1, 30 * mm))
+        story.append(Paragraph(company_name, styles["cover_title"]))
+        story.append(
+            Paragraph(
+                "With reference to the GRI Standards",
+                styles["cover_claim"],
+            )
+        )
+        story.append(
+            HRFlowable(
+                width="100%",
+                thickness=1,
+                color=colors.HexColor("#94A3B8"),
+                spaceBefore=4,
+                spaceAfter=14,
+            )
+        )
+        story.append(Paragraph(f"Industry: <b>{industry}</b>", styles["cover_meta"]))
+        story.append(Paragraph(f"Location: <b>{location}</b>", styles["cover_meta"]))
+        story.append(
+            Paragraph(
+                f"Generated Date: <b>{generated_date}</b>",
+                styles["cover_meta"],
+            )
+        )
+        story.append(PageBreak())
+
+        # Disclosures section
+        story.append(build_section_header("GRI Disclosures"))
+        story.append(Spacer(1, 5 * mm))
+        story.append(
+            HRFlowable(
+                width="100%",
+                thickness=0.8,
+                color=colors.HexColor("#CBD5E1"),
+                spaceAfter=6,
+            )
+        )
+
+        computed_disclosures = [item for item in report.disclosures if item.computed]
+        disclosure_rows: list[list[Any]] = [
+            [
+                Paragraph("Disclosure", styles["table_header"]),
+                Paragraph("Title", styles["table_header"]),
+                Paragraph("Details", styles["table_header"]),
+                Paragraph("Unit", styles["table_header"]),
+            ]
+        ]
+
+        for item in computed_disclosures:
+            detail_lines = flatten_value(item.value)
+            detail_markup = "<br/>".join(detail_lines)
+            disclosure_rows.append(
+                [
+                    Paragraph(item.disclosure, styles["table_body"]),
+                    Paragraph(item.title, styles["table_body"]),
+                    Paragraph(detail_markup, styles["table_body"]),
+                    Paragraph(item.unit or "-", styles["table_body"]),
+                ]
+            )
+
+        if len(disclosure_rows) == 1:
+            disclosure_rows.append(
+                [
+                    Paragraph("-", styles["table_body"]),
+                    Paragraph(
+                        "No computed disclosures available", styles["table_body"]
+                    ),
+                    Paragraph(
+                        "Upload additional evidence to compute GRI disclosures.",
+                        styles["table_body"],
+                    ),
+                    Paragraph("-", styles["table_body"]),
+                ]
+            )
+
+        disclosure_table = Table(
+            disclosure_rows,
+            colWidths=[24 * mm, 46 * mm, 78 * mm, 22 * mm],
+            repeatRows=1,
+        )
+        disclosure_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F766E")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
+                    (
+                        "ROWBACKGROUNDS",
+                        (0, 1),
+                        (-1, -1),
+                        [colors.white, colors.HexColor("#F8FAFC")],
+                    ),
+                ]
+            )
+        )
+        story.append(disclosure_table)
+
+        # Omitted disclosures section
+        story.append(Spacer(1, 8 * mm))
+        story.append(build_section_header("Omitted Disclosures"))
+        story.append(Spacer(1, 4 * mm))
+        story.append(
+            HRFlowable(
+                width="100%",
+                thickness=0.8,
+                color=colors.HexColor("#CBD5E1"),
+                spaceAfter=6,
+            )
+        )
+
+        omission_rows: list[list[Any]] = [
+            [
+                Paragraph("Disclosure", styles["table_header"]),
+                Paragraph("Reason", styles["table_header"]),
+            ]
+        ]
+        for omission in report.reasons_for_omission:
+            omission_rows.append(
+                [
+                    Paragraph(omission.disclosure, styles["table_muted"]),
+                    Paragraph(omission.reason, styles["table_muted"]),
+                ]
+            )
+
+        if len(omission_rows) == 1:
+            omission_rows.append(
+                [
+                    Paragraph("-", styles["table_muted"]),
+                    Paragraph("No omissions were reported.", styles["table_muted"]),
+                ]
+            )
+
+        omission_table = Table(
+            omission_rows,
+            colWidths=[30 * mm, 140 * mm],
+            repeatRows=1,
+        )
+        omission_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#64748B")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
+                    (
+                        "ROWBACKGROUNDS",
+                        (0, 1),
+                        (-1, -1),
+                        [colors.HexColor("#F8FAFC"), colors.HexColor("#F1F5F9")],
+                    ),
+                ]
+            )
+        )
+        story.append(omission_table)
+
+        doc.build(story)
+        return buffer.getvalue()
 
     @staticmethod
     def _to_int(value: Any) -> int | None:
