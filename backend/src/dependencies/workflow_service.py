@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 from datetime import datetime, timezone
 import json
@@ -14,6 +15,7 @@ import zipfile
 from fastapi import HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from google.genai import types
+from pydantic import BaseModel, Field
 
 from src.dependencies.repository import ESGRepository
 from src.schemas.MetricsSchemas.GRI_302_Metrics import (
@@ -79,8 +81,14 @@ FocusPriority = Literal["high", "medium", "low"]
 logger = logging.getLogger(__name__)
 
 
+class AIQuickWinsPayload(BaseModel):
+    quick_wins: list[QuickWinItem] = Field(default_factory=list)
+
+
 class ESGWorkflowService:
     """Application service for onboarding, planning, uploads, and progress workflows."""
+
+    _quick_wins_cache: dict[str, dict[str, Any]] = {}
 
     SUPPORTED_MEDIA_TYPES = {
         "application/pdf",
@@ -664,15 +672,7 @@ class ESGWorkflowService:
         if compliance_status not in {"On Track", "Needs Attention"}:
             compliance_status = "Needs Attention"
 
-        onboarding = company_data.get("onboarding", {})
-        focus_areas = [
-            item.get("area", "") for item in onboarding.get("focus_areas", [])
-        ]
-        if not focus_areas:
-            focus_areas = self._default_focus_by_industry(
-                company_data.get("profile", {}).get("industry", "")
-            )
-        quick_wins = self._build_quick_wins(focus_areas)
+        quick_wins: list[QuickWinItem] = []
 
         return ProgressTrackerResponse(
             company_id=company_id,
@@ -688,28 +688,153 @@ class ESGWorkflowService:
             quick_wins_with_savings=quick_wins,
         )
 
-    def get_quick_wins(self, company_id: str) -> QuickWinsResponse:
+    async def get_quick_wins(self, company_id: str) -> QuickWinsResponse:
         company_data = self.repo.get_company_data(company_id)
         if not company_data:
             raise HTTPException(
                 status_code=404, detail="Company not found. Complete onboarding first."
             )
 
-        onboarding = company_data.get("onboarding", {})
-        focus_areas = [
-            item.get("area", "") for item in onboarding.get("focus_areas", [])
-        ]
-        if not focus_areas:
-            focus_areas = self._default_focus_by_industry(
-                company_data.get("profile", {}).get("industry", "")
+        has_evidence = bool(self.repo.get_evidence_files(company_id))
+        has_uploads = bool(company_data.get("uploads", []))
+        if not has_evidence and not has_uploads:
+            return QuickWinsResponse(
+                company_id=company_id,
+                generated_at=datetime.now(timezone.utc),
+                quick_wins=[],
             )
-        quick_wins = self._build_quick_wins(focus_areas)
+
+        latest_submission = self.repo.get_latest_submission(company_id) or {}
+        dashboard = latest_submission.get("dashboard", {})
+        kpis = dashboard.get("kpis", [])
+        fixed_extraction = latest_submission.get("fixed_extraction", {})
+        evidence_files = self.repo.get_evidence_files(company_id)
+
+        context_hash = self._hash_quick_wins_context(
+            evidence_files=evidence_files,
+            kpis=kpis,
+            fixed_extraction=fixed_extraction,
+        )
+
+        cached = self._quick_wins_cache.get(company_id)
+        if cached and cached.get("context_hash") == context_hash:
+            return QuickWinsResponse(
+                company_id=company_id,
+                generated_at=datetime.now(timezone.utc),
+                quick_wins=cached.get("quick_wins", []),
+            )
+
+        quick_wins = await self._generate_ai_quick_wins(
+            company_id=company_id,
+            company_data=company_data,
+            kpis=kpis,
+            fixed_extraction=fixed_extraction,
+            evidence_files=evidence_files,
+        )
+
+        if quick_wins is not None:
+            self._quick_wins_cache[company_id] = {
+                "context_hash": context_hash,
+                "quick_wins": quick_wins,
+            }
+        elif cached:
+            quick_wins = cached.get("quick_wins", [])
+        else:
+            quick_wins = []
 
         return QuickWinsResponse(
             company_id=company_id,
             generated_at=datetime.now(timezone.utc),
             quick_wins=quick_wins,
         )
+
+    async def _generate_ai_quick_wins(
+        self,
+        company_id: str,
+        company_data: dict[str, Any],
+        kpis: list[dict[str, Any]],
+        fixed_extraction: dict[str, Any],
+        evidence_files: list[dict[str, Any]],
+    ) -> list[QuickWinItem] | None:
+        if self.ai is None:
+            logger.info(
+                "AI unavailable; quick wins skipped for company_id=%s", company_id
+            )
+            return None
+
+        profile = company_data.get("profile", {})
+        onboarding = company_data.get("onboarding", {})
+        focus_areas = [
+            item.get("area", "")
+            for item in onboarding.get("focus_areas", [])
+            if item.get("area")
+        ]
+
+        evidence_summary = [
+            {
+                "filename": item.get("filename"),
+                "media_type": item.get("media_type"),
+                "disclosure_tag": item.get("disclosure_tag"),
+            }
+            for item in evidence_files[:15]
+        ]
+
+        prompt = (
+            "You are an ESG advisor for SMEs. Generate practical quick wins based on uploaded evidence and KPI context. "
+            "Return JSON only with key quick_wins as an array of 1-5 items.\n"
+            "Each quick win must strictly match fields: "
+            "title, impact_area, effort (low|medium), expected_benefit, why_recommended, first_step, estimated_cost_savings_php.\n"
+            "Use only evidence-backed suggestions from the context below. "
+            "If context is insufficient, return an empty quick_wins array.\n\n"
+            f"Company profile: {json.dumps(profile, ensure_ascii=True)}\n"
+            f"Focus areas: {json.dumps(focus_areas, ensure_ascii=True)}\n"
+            f"Latest KPI snapshot: {json.dumps(kpis, ensure_ascii=True)}\n"
+            f"Latest fixed extraction: {json.dumps(fixed_extraction, ensure_ascii=True)}\n"
+            f"Evidence files: {json.dumps(evidence_summary, ensure_ascii=True)}"
+        )
+
+        try:
+            response = await self.ai.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=AIQuickWinsPayload,
+                ),
+            )
+            if response.parsed is not None:
+                return response.parsed.quick_wins[:5]
+        except Exception:
+            logger.exception(
+                "AI quick wins generation failed for company_id=%s.",
+                company_id,
+            )
+
+        return None
+
+    def _hash_quick_wins_context(
+        self,
+        evidence_files: list[dict[str, Any]],
+        kpis: list[dict[str, Any]],
+        fixed_extraction: dict[str, Any],
+    ) -> str:
+        evidence_summary = [
+            {
+                "filename": item.get("filename"),
+                "media_type": item.get("media_type"),
+                "disclosure_tag": item.get("disclosure_tag"),
+                "size_bytes": item.get("size_bytes"),
+                "uploaded_at": item.get("uploaded_at"),
+            }
+            for item in evidence_files
+        ]
+        canonical_payload = {
+            "evidence": evidence_summary,
+            "kpis": kpis,
+            "fixed_extraction": fixed_extraction,
+        }
+        serialized = json.dumps(canonical_payload, sort_keys=True, ensure_ascii=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
     def get_monthly_update_questions(
         self,

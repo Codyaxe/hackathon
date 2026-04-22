@@ -63,7 +63,7 @@ export default function QuickActions({ quickWins = [], isLoading = false }: Quic
           <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>Loading recommendations...</p>
         ) : quickWins.length === 0 ? (
           <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>
-            Complete onboarding to get personalized quick-win recommendations.
+            Upload evidence files first to get AI-generated quick-win recommendations.
           </p>
         ) : (
           <div className="space-y-3">

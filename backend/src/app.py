@@ -201,11 +201,11 @@ def get_progress_tracker(
 
 
 @app.get("/workflow/quick-wins/{company_id}", response_model=QuickWinsResponse)
-def get_quick_wins(
+async def get_quick_wins(
     company_id: str,
     workflow: ESGWorkflowService = Depends(ESGWorkflowService),
 ) -> QuickWinsResponse:
-    return workflow.get_quick_wins(company_id)
+    return await workflow.get_quick_wins(company_id)
 
 
 @app.get(
