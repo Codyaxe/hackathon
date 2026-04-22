@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { FileText, Download, RefreshCw, Paperclip } from 'lucide-react';
+import { FileText, Download, RefreshCw, Paperclip, Trash2 } from 'lucide-react';
 
 import AppLayout from '../components/layout/AppLayout';
 import Button from '../components/ui/Button';
@@ -9,6 +9,7 @@ import Badge from '../components/ui/Badge';
 import { useThemeStore } from '../stores/themeStore';
 import { getStoredCompanyProfile } from '../lib/companyProfile';
 import {
+  deleteEvidenceFile,
   downloadESGReportPdf,
   downloadEvidenceFile,
   getESGReport,
@@ -23,6 +24,7 @@ export default function Reports() {
   const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFileRecord[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const { theme } = useThemeStore();
@@ -73,6 +75,24 @@ export default function Reports() {
       URL.revokeObjectURL(url);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Could not download evidence file.');
+    }
+  };
+
+  const handleDeleteEvidence = async (file: EvidenceFileRecord) => {
+    const confirmed = window.confirm(`Delete evidence file "${file.filename}"? This cannot be undone.`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeletingFileId(file.file_id);
+      setErrorMessage(null);
+      await deleteEvidenceFile(company.companyId, file.file_id);
+      setEvidenceFiles((prev) => prev.filter((item) => item.file_id !== file.file_id));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not delete evidence file.');
+    } finally {
+      setDeletingFileId(null);
     }
   };
 
@@ -184,14 +204,26 @@ export default function Reports() {
                       {file.disclosure_tag ?? 'Unmapped disclosure'} • {(file.size_bytes / 1024).toFixed(1)} KB
                     </p>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<Download className="w-4 h-4" />}
-                    onClick={() => handleDownloadEvidence(file)}
-                  >
-                    Download
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<Download className="w-4 h-4" />}
+                      onClick={() => handleDownloadEvidence(file)}
+                    >
+                      Download
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      icon={<Trash2 className="w-4 h-4" />}
+                      onClick={() => handleDeleteEvidence(file)}
+                      loading={deletingFileId === file.file_id}
+                      disabled={deletingFileId !== null && deletingFileId !== file.file_id}
+                    >
+                      Delete
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>

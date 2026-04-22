@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import io
 from datetime import datetime, timezone
+import json
+import logging
 from pathlib import Path
 import re
 from typing import Any, Literal, Sequence, cast
 from uuid import uuid4
+import xml.etree.ElementTree as ET
+import zipfile
 
 from fastapi import HTTPException, Request, UploadFile
+from fastapi.encoders import jsonable_encoder
 from google.genai import types
 
 from src.dependencies.repository import ESGRepository
@@ -69,6 +75,8 @@ FocusAreaName = Literal[
     "supply_chain",
 ]
 FocusPriority = Literal["high", "medium", "low"]
+
+logger = logging.getLogger(__name__)
 
 
 class ESGWorkflowService:
@@ -258,6 +266,7 @@ class ESGWorkflowService:
         ]
         if notes:
             file_parts.append(types.Part.from_text(text=f"User notes: {notes}"))
+        text_previews: list[str] = []
 
         upload_records: list[UploadedFileRecord] = []
         evidence_records: list[dict[str, Any]] = []
@@ -308,10 +317,29 @@ class ESGWorkflowService:
 
             if media_type in {"text/csv", "text/plain"}:
                 text_preview = binary.decode("utf-8", errors="ignore")[:20000]
+                text_previews.append(text_preview)
                 file_parts.append(
                     types.Part.from_text(
                         text=f"File: {record.filename}\nContent preview:\n{text_preview}"
                     )
+                )
+            elif media_type in {
+                "application/vnd.ms-excel",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            }:
+                spreadsheet_preview = self._extract_spreadsheet_preview(binary)
+                if spreadsheet_preview:
+                    text_previews.append(spreadsheet_preview)
+                    file_parts.append(
+                        types.Part.from_text(
+                            text=(
+                                f"Spreadsheet: {record.filename}\n"
+                                f"Extracted cell preview:\n{spreadsheet_preview[:20000]}"
+                            )
+                        )
+                    )
+                file_parts.append(
+                    types.Part.from_bytes(data=binary, mime_type=media_type)
                 )
             else:
                 file_parts.append(
@@ -323,10 +351,34 @@ class ESGWorkflowService:
                 status_code=400, detail="No readable files were uploaded."
             )
 
-        extraction = await self._extract_metrics_with_ai(file_parts, upload_records)
+        logger.info(
+            "Upload received for company_id=%s with %d files. AI client ready=%s",
+            company_id,
+            len(upload_records),
+            self.ai is not None,
+        )
+
+        combined_preview = "\n\n".join(text_previews).strip()
+        extraction = await self._extract_metrics_with_ai(
+            file_parts,
+            upload_records,
+            text_preview=combined_preview,
+        )
         fixed_extraction = await self._extract_fixed_metrics_with_ai(
             file_parts=file_parts,
             fallback_headcount=company_data.get("profile", {}).get("employee_count"),
+            text_preview=combined_preview,
+        )
+        logger.info(
+            "Fixed extraction for company_id=%s -> electricity_kwh=%s diesel_liters=%s waste_kg=%s headcount=%s new_hires=%s turnover_count=%s missing=%s",
+            company_id,
+            fixed_extraction.electricity_kwh,
+            fixed_extraction.diesel_liters,
+            fixed_extraction.waste_kg,
+            fixed_extraction.headcount,
+            fixed_extraction.new_hires,
+            fixed_extraction.turnover_count,
+            fixed_extraction.missing_fields,
         )
 
         pipeline_submission = self._run_submission_pipeline(
@@ -406,6 +458,27 @@ class ESGWorkflowService:
             )
 
         return file_path, metadata
+
+    def delete_evidence_file(self, company_id: str, file_id: str) -> None:
+        metadata = self.repo.get_evidence_file(company_id, file_id)
+        if not metadata:
+            raise HTTPException(status_code=404, detail="Evidence file not found.")
+
+        raw_path = metadata.get("storage_path")
+        if raw_path:
+            file_path = Path(raw_path)
+            try:
+                if file_path.exists() and file_path.is_file():
+                    file_path.unlink()
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to delete evidence file content.",
+                ) from exc
+
+        removed = self.repo.delete_evidence_file(company_id, file_id)
+        if removed is None:
+            raise HTTPException(status_code=404, detail="Evidence file not found.")
 
     def get_esg_report(self, company_id: str) -> ESGReportResponse:
         company_data = self.repo.get_company_data(company_id)
@@ -1073,9 +1146,10 @@ class ESGWorkflowService:
         self,
         file_parts: list[types.Part],
         upload_records: list[UploadedFileRecord],
+        text_preview: str | None = None,
     ) -> AIFileExtractionResult:
         if self.ai is None:
-            return self._fallback_file_extraction(upload_records)
+            return self._fallback_file_extraction(upload_records, text_preview)
 
         try:
             response = await self.ai.models.generate_content(
@@ -1091,12 +1165,18 @@ class ESGWorkflowService:
         except Exception:
             pass
 
-        return self._fallback_file_extraction(upload_records)
+        return self._fallback_file_extraction(upload_records, text_preview)
 
     def _fallback_file_extraction(
-        self, upload_records: list[UploadedFileRecord]
+        self,
+        upload_records: list[UploadedFileRecord],
+        text_preview: str | None = None,
     ) -> AIFileExtractionResult:
         metrics: list[ExtractedMetric] = []
+
+        if text_preview:
+            inferred_metrics = self._extract_metrics_from_text_preview(text_preview)
+            metrics.extend(inferred_metrics)
 
         for record in upload_records:
             filename = record.filename.lower()
@@ -1147,13 +1227,107 @@ class ESGWorkflowService:
             )
 
         return AIFileExtractionResult(
-            summary="Files were uploaded successfully. Please review suggested fields and refine where needed.",
+            summary=(
+                "Files were uploaded successfully. "
+                "We extracted what we could from the provided file content; please review and refine if needed."
+            ),
             metrics=metrics,
             follow_up_questions=[
                 "Which month or reporting period do these files represent?",
                 "Do you want extraction to prioritize energy, emissions, workforce, or waste metrics?",
             ],
         )
+
+    def _extract_spreadsheet_preview(self, binary: bytes) -> str:
+        values: list[str] = []
+
+        # Prefer openpyxl when available for better spreadsheet value extraction.
+        try:
+            import openpyxl  # type: ignore
+
+            workbook = openpyxl.load_workbook(
+                io.BytesIO(binary),
+                data_only=True,
+                read_only=True,
+            )
+            for sheet in workbook.worksheets[:3]:
+                for row in sheet.iter_rows(min_row=1, max_row=100, max_col=20):
+                    row_values: list[str] = []
+                    for cell in row:
+                        if cell.value is None:
+                            continue
+                        text = str(cell.value).strip()
+                        if text:
+                            row_values.append(text)
+                    if row_values:
+                        values.append(" | ".join(row_values))
+                    if len(values) >= 500:
+                        break
+                if len(values) >= 500:
+                    break
+            if values:
+                return "\n".join(values)[:40000]
+        except Exception:
+            pass
+
+        # Fallback parser for XLSX files without external dependencies.
+        try:
+            with zipfile.ZipFile(io.BytesIO(binary)) as archive:
+                shared_strings: list[str] = []
+                if "xl/sharedStrings.xml" in archive.namelist():
+                    raw = archive.read("xl/sharedStrings.xml")
+                    root = ET.fromstring(raw)
+                    for item in root.findall(".//{*}si"):
+                        parts = [node.text or "" for node in item.findall(".//{*}t")]
+                        shared_strings.append("".join(parts).strip())
+
+                sheet_names = [
+                    name
+                    for name in archive.namelist()
+                    if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
+                ]
+                for sheet_name in sheet_names[:3]:
+                    raw_sheet = archive.read(sheet_name)
+                    root = ET.fromstring(raw_sheet)
+                    for row in root.findall(".//{*}row"):
+                        row_values: list[str] = []
+                        for cell in row.findall("{*}c"):
+                            cell_type = cell.attrib.get("t")
+                            value_text = ""
+
+                            value_node = cell.find("{*}v")
+                            inline_node = cell.find("{*}is/{*}t")
+
+                            if inline_node is not None and inline_node.text:
+                                value_text = inline_node.text.strip()
+                            elif value_node is not None and value_node.text:
+                                value_text = value_node.text.strip()
+
+                            if not value_text:
+                                continue
+
+                            if cell_type == "s":
+                                try:
+                                    idx = int(value_text)
+                                    if 0 <= idx < len(shared_strings):
+                                        value_text = shared_strings[idx]
+                                except ValueError:
+                                    pass
+
+                            if value_text:
+                                row_values.append(value_text)
+
+                        if row_values:
+                            values.append(" | ".join(row_values))
+
+                        if len(values) >= 500:
+                            break
+                    if len(values) >= 500:
+                        break
+        except Exception:
+            return ""
+
+        return "\n".join(value for value in values if value)[:40000]
 
     def _normalize_media_type(self, upload: UploadFile) -> str:
         if upload.content_type:
@@ -1480,9 +1654,18 @@ class ESGWorkflowService:
         self,
         file_parts: list[types.Part],
         fallback_headcount: Any,
+        text_preview: str | None = None,
     ) -> FixedExtractionMetrics:
+        heuristic_metrics = self._fixed_metrics_from_text_preview(
+            text_preview=text_preview,
+            fallback_headcount=fallback_headcount,
+        )
+
         if self.ai is None:
-            return self._fixed_metrics_from_changes({}, fallback_headcount)
+            logger.info(
+                "AI client unavailable for fixed extraction. Using heuristic fallback."
+            )
+            return heuristic_metrics
 
         extraction_prompt = (
             "Extract ESG values using this exact JSON schema only: "
@@ -1504,11 +1687,189 @@ class ESGWorkflowService:
                 ),
             )
             if response.parsed:
-                return self._ensure_fixed_missing_fields(response.parsed)
+                logger.info("AI fixed extraction parsed successfully.")
+                return self._merge_fixed_metrics(
+                    primary=self._ensure_fixed_missing_fields(response.parsed),
+                    fallback=heuristic_metrics,
+                )
         except Exception:
+            logger.exception("AI fixed extraction failed; using heuristic fallback.")
             pass
 
-        return self._fixed_metrics_from_changes({}, fallback_headcount)
+        logger.info(
+            "AI fixed extraction returned no parsed payload; using heuristic fallback."
+        )
+        return heuristic_metrics
+
+    def _merge_fixed_metrics(
+        self,
+        primary: FixedExtractionMetrics,
+        fallback: FixedExtractionMetrics,
+    ) -> FixedExtractionMetrics:
+        merged = FixedExtractionMetrics(
+            electricity_kwh=(
+                primary.electricity_kwh
+                if primary.electricity_kwh is not None
+                else fallback.electricity_kwh
+            ),
+            diesel_liters=(
+                primary.diesel_liters
+                if primary.diesel_liters is not None
+                else fallback.diesel_liters
+            ),
+            waste_kg=(
+                primary.waste_kg if primary.waste_kg is not None else fallback.waste_kg
+            ),
+            headcount=(
+                primary.headcount
+                if primary.headcount is not None
+                else fallback.headcount
+            ),
+            new_hires=(
+                primary.new_hires
+                if primary.new_hires is not None
+                else fallback.new_hires
+            ),
+            turnover_count=(
+                primary.turnover_count
+                if primary.turnover_count is not None
+                else fallback.turnover_count
+            ),
+        )
+        return self._ensure_fixed_missing_fields(merged)
+
+    def _extract_metrics_from_text_preview(
+        self,
+        text_preview: str,
+    ) -> list[ExtractedMetric]:
+        fixed = self._fixed_metrics_from_text_preview(
+            text_preview=text_preview,
+            fallback_headcount=None,
+        )
+        metrics: list[ExtractedMetric] = []
+
+        mapping: list[tuple[str, float | int | None, str, str]] = [
+            ("electricity_kwh", fixed.electricity_kwh, "kWh", "energy"),
+            ("diesel_liters", fixed.diesel_liters, "liters", "energy"),
+            ("waste_kg", fixed.waste_kg, "kg", "waste"),
+            ("headcount", fixed.headcount, "employees", "workforce"),
+            ("new_hires", fixed.new_hires, "employees", "workforce"),
+            ("turnover_count", fixed.turnover_count, "employees", "workforce"),
+        ]
+
+        for metric_name, value, unit, category in mapping:
+            if value is None:
+                continue
+            metrics.append(
+                ExtractedMetric(
+                    metric_name=metric_name,
+                    value=str(value),
+                    unit=unit,
+                    category=category,
+                    confidence=0.65,
+                    evidence="Inferred from uploaded spreadsheet/text content.",
+                )
+            )
+
+        return metrics
+
+    def _extract_numeric_after_keywords(
+        self,
+        text: str,
+        keywords: list[str],
+    ) -> float | None:
+        lowered = text.lower()
+        pattern = re.compile(r"(-?\d{1,3}(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?)")
+        candidates: list[float] = []
+
+        # First pass: line-scoped matching preserves spreadsheet row structure.
+        for line in text.splitlines():
+            line_lower = line.lower()
+            if not any(keyword in line_lower for keyword in keywords):
+                continue
+            for match in pattern.finditer(line):
+                number_text = match.group(1).replace(",", "")
+                try:
+                    value = float(number_text)
+                except ValueError:
+                    continue
+                if value > 0:
+                    candidates.append(value)
+
+        for keyword in keywords:
+            search_start = 0
+            while True:
+                idx = lowered.find(keyword, search_start)
+                if idx == -1:
+                    break
+                search_start = idx + len(keyword)
+
+                # Capture numbers both before and after the keyword.
+                left = max(0, idx - 120)
+                right = min(len(text), idx + len(keyword) + 120)
+                window = text[left:right]
+
+                for match in pattern.finditer(window):
+                    number_text = match.group(1).replace(",", "")
+                    try:
+                        value = float(number_text)
+                    except ValueError:
+                        continue
+                    if value > 0:
+                        candidates.append(value)
+
+        if not candidates:
+            return None
+
+        # Prefer the largest positive value as a practical default for ESG totals.
+        return max(candidates)
+
+    def _fixed_metrics_from_text_preview(
+        self,
+        text_preview: str | None,
+        fallback_headcount: Any,
+    ) -> FixedExtractionMetrics:
+        if not text_preview:
+            return self._fixed_metrics_from_changes({}, fallback_headcount)
+
+        electricity_kwh = self._extract_numeric_after_keywords(
+            text_preview,
+            ["electricity", "kwh", "power consumption", "grid"],
+        )
+        diesel_liters = self._extract_numeric_after_keywords(
+            text_preview,
+            ["diesel", "fuel liters", "fuel usage", "liters"],
+        )
+        waste_kg = self._extract_numeric_after_keywords(
+            text_preview,
+            ["waste", "landfill", "recycled", "kg"],
+        )
+        headcount = self._extract_numeric_after_keywords(
+            text_preview,
+            ["headcount", "employees", "employee count", "workforce"],
+        )
+        new_hires = self._extract_numeric_after_keywords(
+            text_preview,
+            ["new hires", "hires", "hired"],
+        )
+        turnover_count = self._extract_numeric_after_keywords(
+            text_preview,
+            ["turnover", "attrition", "leavers"],
+        )
+
+        parsed_headcount = self._to_int(headcount)
+        if parsed_headcount is None:
+            parsed_headcount = self._to_int(fallback_headcount)
+
+        metrics = FixedExtractionMetrics(
+            electricity_kwh=electricity_kwh,
+            diesel_liters=diesel_liters,
+            waste_kg=waste_kg,
+            headcount=parsed_headcount,
+            new_hires=self._to_int(new_hires),
+            turnover_count=self._to_int(turnover_count),
+        )
+        return self._ensure_fixed_missing_fields(metrics)
 
     def _ensure_fixed_missing_fields(
         self,
@@ -1617,6 +1978,7 @@ class ESGWorkflowService:
             fixed_extraction=fixed_extraction,
             computations=computations,
         )
+        serialized_computations = jsonable_encoder(computations)
 
         submission_payload = {
             "submission_id": submission_id,
@@ -1630,7 +1992,7 @@ class ESGWorkflowService:
                 "gri_305": gri_305.model_dump(mode="json"),
                 "gri_401": gri_401.model_dump(mode="json"),
             },
-            "computations": computations,
+            "computations": serialized_computations,
             "dashboard": dashboard_payload,
             "report": report_payload,
             "evidence": evidence_records,
@@ -1923,11 +2285,11 @@ class ESGWorkflowService:
 
         kpis: list[DashboardKPI] = []
 
+        total_energy_data = (
+            computations.get("gri_302", {}).get("302_1", {}).get("value", {})
+        )
         total_energy = (
-            computations.get("gri_302", {})
-            .get("302_1", {})
-            .get("value", {})
-            .get("total_energy_mj")
+            total_energy_data.get("total_energy_mj") if total_energy_data else None
         )
         if total_energy is not None:
             kpis.append(
@@ -1939,11 +2301,11 @@ class ESGWorkflowService:
                 )
             )
 
+        scope1_total_data = (
+            (computations.get("gri_305") or {}).get("305_1") or {}
+        ).get("value") or {}
         scope1_total = (
-            computations.get("gri_305", {})
-            .get("305_1", {})
-            .get("value", {})
-            .get("total_kg_co2e")
+            scope1_total_data.get("total_kg_co2e") if scope1_total_data else None
         )
         if scope1_total is not None:
             kpis.append(
@@ -1955,11 +2317,13 @@ class ESGWorkflowService:
                 )
             )
 
+        scope2_total_data = (
+            (computations.get("gri_305") or {}).get("305_2") or {}
+        ).get("value") or {}
         scope2_total = (
-            computations.get("gri_305", {})
-            .get("305_2", {})
-            .get("value", {})
-            .get("location_based_kg_co2e")
+            scope2_total_data.get("location_based_kg_co2e")
+            if scope2_total_data
+            else None
         )
         if scope2_total is not None:
             kpis.append(
@@ -1981,13 +2345,10 @@ class ESGWorkflowService:
                 )
             )
 
-        hires_rate = (
-            computations.get("gri_401", {})
-            .get("401_1", {})
-            .get("value", {})
-            .get("new_hires", {})
-            .get("rate")
-        )
+        gri_401_1_value = ((computations.get("gri_401") or {}).get("401_1") or {}).get(
+            "value"
+        ) or {}
+        hires_rate = (gri_401_1_value.get("new_hires") or {}).get("rate")
         if hires_rate is not None:
             kpis.append(
                 DashboardKPI(
@@ -1998,13 +2359,7 @@ class ESGWorkflowService:
                 )
             )
 
-        turnover_rate = (
-            computations.get("gri_401", {})
-            .get("401_1", {})
-            .get("value", {})
-            .get("turnover", {})
-            .get("rate")
-        )
+        turnover_rate = (gri_401_1_value.get("turnover") or {}).get("rate")
         if turnover_rate is not None:
             kpis.append(
                 DashboardKPI(

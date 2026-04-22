@@ -273,6 +273,16 @@ def download_evidence(
     )
 
 
+@app.delete("/evidence/{company_id}/{file_id}", status_code=204)
+def delete_evidence(
+    company_id: str,
+    file_id: str,
+    workflow: ESGWorkflowService = Depends(ESGWorkflowService),
+) -> Response:
+    workflow.delete_evidence_file(company_id, file_id)
+    return Response(status_code=204)
+
+
 @app.get("/workflow/report/{company_id}", response_model=ESGReportResponse)
 def get_workflow_report(
     company_id: str,

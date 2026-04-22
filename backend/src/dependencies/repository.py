@@ -180,6 +180,26 @@ class ESGRepository:
                 return item
         return None
 
+    def delete_evidence_file(
+        self,
+        company_id: str,
+        file_id: str,
+    ) -> dict[str, Any] | None:
+        data = self._load()
+        record = data.get("companies", {}).get(company_id)
+        if not record:
+            return None
+
+        evidence = record.get("evidence", [])
+        for index, item in enumerate(evidence):
+            if item.get("file_id") == file_id:
+                removed = evidence.pop(index)
+                record["updated_at"] = self.utc_now_iso()
+                self._save(data)
+                return deepcopy(removed)
+
+        return None
+
     def save_submission(
         self,
         company_id: str,
