@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 
 import Input from '../components/ui/Input';
+import { ensureCompanyProfile } from '../lib/companyProfile';
 import { useThemeStore } from '../stores/themeStore';
 
 const VALID_EMAIL = 'admin@apexmfg.com';
@@ -127,6 +128,7 @@ export default function LoginPage() {
 
     if (email === VALID_EMAIL && password === VALID_PASSWORD) {
       localStorage.setItem('esg_auth', 'true');
+      ensureCompanyProfile();
       navigate('/dashboard', { replace: true });
     } else {
       setError('Invalid email or password');
@@ -169,7 +171,7 @@ export default function LoginPage() {
               transition={{ delay: 0.2, duration: 0.5 }}
               className="font-display text-5xl text-white mb-4"
             >
-              ESG Hub
+              Esverdant
             </motion.h1>
             <motion.p
               initial={{ opacity: 0 }}

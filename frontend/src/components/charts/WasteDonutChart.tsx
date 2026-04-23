@@ -1,21 +1,19 @@
 import { motion } from 'framer-motion';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { wasteData } from '../../data/mock/esg-data';
+import type { WasteData } from '../../types/esg';
 import { useThemeStore } from '../../stores/themeStore';
 
-const data = [
-  { name: 'Recycled', value: wasteData.reduce((acc, d) => acc + d.recycled, 0) },
-  { name: 'Landfill', value: wasteData.reduce((acc, d) => acc + d.landfill, 0) },
-];
+interface WasteDonutChartProps {
+  data?: WasteData[];
+}
 
 const COLORS = ['#2d9e6b', '#D4A574'];
 
-function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<{ value: number; name: string }> }) {
+function CustomTooltip({ active, payload, total }: { active?: boolean; payload?: Array<{ value: number; name: string }>; total: number }) {
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
 
   if (active && payload && payload.length) {
-    const total = data.reduce((acc, d) => acc + d.value, 0);
     const percentage = ((payload[0].value / total) * 100).toFixed(1);
     return (
       <div
@@ -37,13 +35,19 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   return null;
 }
 
-export default function WasteDonutChart() {
+export default function WasteDonutChart({ data = [] }: WasteDonutChartProps) {
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
 
-  const total = data.reduce((acc, d) => acc + d.value, 0);
-  const recycled = data[0].value;
-  const rate = ((recycled / total) * 100).toFixed(1);
+  const chartData = [
+    { name: 'Recycled', value: data.reduce((acc, d) => acc + d.recycled, 0) },
+    { name: 'Landfill', value: data.reduce((acc, d) => acc + d.landfill, 0) },
+  ];
+
+  const total = chartData.reduce((acc, d) => acc + d.value, 0);
+  const recycled = chartData[0].value;
+  const rate = total > 0 ? ((recycled / total) * 100).toFixed(1) : '0.0';
+  const hasData = total > 0;
 
   return (
     <motion.div
@@ -63,32 +67,42 @@ export default function WasteDonutChart() {
         </p>
       </div>
       <div className="h-64 relative">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={data}
-              cx="50%"
-              cy="50%"
-              innerRadius={60}
-              outerRadius={90}
-              paddingAngle={2}
-              dataKey="value"
-              animationDuration={1500}
-            >
-              {data.map((_, index) => (
-                <Cell key={`cell-${index}`} fill={COLORS[index]} />
-              ))}
-            </Pie>
-            <Tooltip content={<CustomTooltip />} />
-          </PieChart>
-        </ResponsiveContainer>
-        {/* Center text */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="text-center">
-            <p className="text-3xl font-display" style={{ color: '#2d9e6b' }}>{rate}%</p>
-            <p className="text-xs" style={{ color: isDark ? 'rgba(255,255,255,0.55)' : '#6b7c93' }}>Recycled</p>
+        {hasData ? (
+          <>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={chartData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={90}
+                  paddingAngle={2}
+                  dataKey="value"
+                  animationDuration={1500}
+                >
+                  {chartData.map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index]} />
+                  ))}
+                </Pie>
+                <Tooltip content={<CustomTooltip total={total} />} />
+              </PieChart>
+            </ResponsiveContainer>
+            {/* Center text */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="text-center">
+                <p className="text-3xl font-display" style={{ color: '#2d9e6b' }}>{rate}%</p>
+                <p className="text-xs" style={{ color: isDark ? 'rgba(255,255,255,0.55)' : '#6b7c93' }}>Recycled</p>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="h-full flex items-center justify-center">
+            <p className={`text-sm text-center ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>
+              No monthly waste data yet. Submit a monthly checkup to populate this chart.
+            </p>
           </div>
-        </div>
+        )}
       </div>
       {/* Legend */}
       <div className="flex justify-center gap-6 mt-2">

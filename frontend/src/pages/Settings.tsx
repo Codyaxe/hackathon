@@ -1,21 +1,55 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Building2, MapPin, Bell, Shield, Database, LogOut } from 'lucide-react';
+import { Building2, MapPin, Bell, Shield, Database, LogOut, RotateCcw } from 'lucide-react';
 import AppLayout from '../components/layout/AppLayout';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
-import { company } from '../data/mock/esg-data';
+import { getStoredCompanyProfile, saveCompanyProfile } from '../lib/companyProfile';
 import { useThemeStore } from '../stores/themeStore';
+import { resetWorkflowArtifacts } from '../lib/workflowApi';
 
 export default function Settings() {
   const navigate = useNavigate();
+  const [profile, setProfile] = useState(getStoredCompanyProfile());
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
 
   const handleSignOut = () => {
     localStorage.removeItem('esg_auth');
     navigate('/login', { replace: true });
+  };
+
+  const handleSaveProfile = () => {
+    const saved = saveCompanyProfile(profile);
+    setProfile(saved);
+    setSaveMessage('Company profile updated successfully.');
+    setTimeout(() => setSaveMessage(null), 3000);
+  };
+
+  const handleResetReporting = async () => {
+    const confirmed = window.confirm(
+      'Reset GRI disclosures and KPI progress data for this company? This clears uploads, extractions, monthly updates, and computed report snapshots.',
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setIsResetting(true);
+      const result = await resetWorkflowArtifacts(profile.companyId);
+      setResetMessage(result.message);
+      setTimeout(() => setResetMessage(null), 4000);
+    } catch (error) {
+      setResetMessage(error instanceof Error ? error.message : 'Failed to reset ESG reporting artifacts.');
+      setTimeout(() => setResetMessage(null), 5000);
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   return (
@@ -38,15 +72,28 @@ export default function Settings() {
             </div>
 
             <div className="space-y-4">
-              <Input label="Company Name" defaultValue={company.name} />
+              <Input
+                label="Company Name"
+                value={profile.companyName}
+                onChange={(event) => setProfile((prev) => ({ ...prev, companyName: event.target.value }))}
+              />
+              <Input
+                label="Company ID"
+                value={profile.companyId}
+                disabled
+              />
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={`block text-sm font-medium mb-1.5 ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>Industry</label>
-                  <select className={`w-full border rounded-lg px-4 py-2.5 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-[#2d9e6b]/40 focus:border-[#2d9e6b] ${
-                    isDark
-                      ? 'bg-[#0f2040] border-white/15 text-white'
-                      : 'bg-white border-[#e2e8f0] text-[#1a2b3c]'
-                  }`}>
+                  <select
+                    value={profile.industry}
+                    onChange={(event) => setProfile((prev) => ({ ...prev, industry: event.target.value }))}
+                    className={`w-full border rounded-lg px-4 py-2.5 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-[#2d9e6b]/40 focus:border-[#2d9e6b] ${
+                      isDark
+                        ? 'bg-[#0f2040] border-white/15 text-white'
+                        : 'bg-white border-[#e2e8f0] text-[#1a2b3c]'
+                    }`}
+                  >
                     <option>Manufacturing</option>
                     <option>Technology</option>
                     <option>Healthcare</option>
@@ -54,9 +101,31 @@ export default function Settings() {
                     <option>Retail</option>
                   </select>
                 </div>
-                <Input label="Employee Count" defaultValue={company.employeeCount} />
+                <Input
+                  label="Employee Count"
+                  type="number"
+                  min={1}
+                  value={String(profile.employeeCount)}
+                  onChange={(event) => {
+                    const nextCount = Number.parseInt(event.target.value, 10);
+                    setProfile((prev) => ({
+                      ...prev,
+                      employeeCount: Number.isNaN(nextCount) ? prev.employeeCount : nextCount,
+                    }));
+                  }}
+                />
               </div>
-              <Input label="Location" defaultValue={company.location} icon={<MapPin className="w-4 h-4" />} />
+              <Input
+                label="Location"
+                value={profile.location ?? ''}
+                onChange={(event) => setProfile((prev) => ({ ...prev, location: event.target.value }))}
+                icon={<MapPin className="w-4 h-4" />}
+              />
+              <Input
+                label="Primary Country"
+                value={profile.primaryCountry ?? ''}
+                onChange={(event) => setProfile((prev) => ({ ...prev, primaryCountry: event.target.value }))}
+              />
             </div>
           </Card>
         </motion.div>
@@ -126,6 +195,25 @@ export default function Settings() {
               <p className={`text-xs ${isDark ? 'text-white/40' : 'text-[#6b7c93]'}`}>
                 Download a complete copy of all your ESG data in CSV format.
               </p>
+
+              <div className={`pt-4 ${isDark ? 'border-t border-white/10' : 'border-t border-[#e2e8f0]'}`}>
+                <Button
+                  variant="danger"
+                  icon={<RotateCcw className="w-4 h-4" />}
+                  onClick={handleResetReporting}
+                  loading={isResetting}
+                >
+                  Reset GRI & KPI Data
+                </Button>
+                <p className={`mt-2 text-xs ${isDark ? 'text-white/40' : 'text-[#6b7c93]'}`}>
+                  Clears workflow uploads, extracted metrics, monthly updates, and computed GRI/KPI snapshots for this company.
+                </p>
+                {resetMessage && (
+                  <p className={`mt-2 text-sm ${isDark ? 'text-[#f2d58b]' : 'text-[#9a6b00]'}`}>
+                    {resetMessage}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className={`mt-6 pt-6 ${isDark ? 'border-t border-white/10' : 'border-t border-[#e2e8f0]'}`}>
@@ -145,9 +233,14 @@ export default function Settings() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3 }}
-          className="flex justify-end"
+          className="flex items-center justify-end gap-3"
         >
-          <Button>Save Changes</Button>
+          {saveMessage && (
+            <span className={`text-sm ${isDark ? 'text-[#9edab9]' : 'text-[#2d9e6b]'}`}>
+              {saveMessage}
+            </span>
+          )}
+          <Button onClick={handleSaveProfile}>Save Changes</Button>
         </motion.div>
       </div>
     </AppLayout>

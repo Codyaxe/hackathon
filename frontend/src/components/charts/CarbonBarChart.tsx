@@ -52,6 +52,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 export default function CarbonBarChart({ data }: CarbonBarChartProps) {
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
+  const hasData = data.length > 0;
 
   const gridColor = isDark ? 'rgba(255,255,255,0.06)' : '#e2e8f0';
   const textColor = isDark ? 'rgba(255,255,255,0.4)' : '#9ca3af';
@@ -74,34 +75,42 @@ export default function CarbonBarChart({ data }: CarbonBarChartProps) {
         </p>
       </div>
       <div className="h-72">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
-            <XAxis
-              dataKey="month"
-              axisLine={false}
-              tickLine={false}
-              tick={{ fill: textColor, fontSize: 12 }}
-            />
-            <YAxis
-              axisLine={false}
-              tickLine={false}
-              tick={{ fill: textColor, fontSize: 12 }}
-            />
-            <Tooltip content={<CustomTooltip />} />
-            <Legend
-              verticalAlign="top"
-              align="right"
-              iconType="circle"
-              iconSize={8}
-              wrapperStyle={{ paddingBottom: 16 }}
-              formatter={(value) => <span className="text-xs" style={{ color: isDark ? 'rgba(255,255,255,0.55)' : '#6b7c93' }}>{value}</span>}
-            />
-            <Bar dataKey="scope1" stackId="a" fill="#D4A574" radius={[0, 0, 0, 0]} animationDuration={1500} />
-            <Bar dataKey="scope2" stackId="a" fill="#2d9e6b" radius={[0, 0, 0, 0]} animationDuration={1500} />
-            <Bar dataKey="scope3" stackId="a" fill={isDark ? '#64748b' : '#94a3b8'} radius={[4, 4, 0, 0]} animationDuration={1500} />
-          </BarChart>
-        </ResponsiveContainer>
+        {hasData ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
+              <XAxis
+                dataKey="month"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: textColor, fontSize: 12 }}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: textColor, fontSize: 12 }}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Legend
+                verticalAlign="top"
+                align="right"
+                iconType="circle"
+                iconSize={8}
+                wrapperStyle={{ paddingBottom: 16 }}
+                formatter={(value) => <span className="text-xs" style={{ color: isDark ? 'rgba(255,255,255,0.55)' : '#6b7c93' }}>{value}</span>}
+              />
+              <Bar dataKey="scope1" stackId="a" fill="#D4A574" radius={[0, 0, 0, 0]} animationDuration={1500} />
+              <Bar dataKey="scope2" stackId="a" fill="#2d9e6b" radius={[0, 0, 0, 0]} animationDuration={1500} />
+              <Bar dataKey="scope3" stackId="a" fill={isDark ? '#64748b' : '#94a3b8'} radius={[4, 4, 0, 0]} animationDuration={1500} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="h-full flex items-center justify-center">
+            <p className={`text-sm text-center ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>
+              No monthly emissions data yet. Submit a monthly checkup to populate this chart.
+            </p>
+          </div>
+        )}
       </div>
     </motion.div>
   );

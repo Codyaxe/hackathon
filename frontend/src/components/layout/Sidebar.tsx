@@ -1,19 +1,23 @@
 import { motion } from 'framer-motion';
 import { NavLink } from 'react-router-dom';
 import {
+  Calendar,
   LayoutDashboard,
   FileInput,
   FileText,
   Library,
   Settings,
   Leaf,
+  Zap,
 } from 'lucide-react';
 import { useThemeStore } from '../../stores/themeStore';
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/data-input', icon: FileInput, label: 'Data Input' },
-  { to: '/reports', icon: FileText, label: 'Reports' },
+  { to: '/monthly-checkup', icon: Calendar, label: 'Monthly Checkup' },
+  { to: '/one-plan', icon: Zap, label: 'One Plan' },
+  { to: '/reports', icon: FileText, label: 'ESG Report' },
   { to: '/response-library', icon: Library, label: 'Response Library' },
 ];
 
@@ -46,7 +50,7 @@ export default function Sidebar() {
           </div>
           <div>
             <h1 className={`font-display text-lg leading-tight ${isDark ? 'text-white font-bold' : 'text-[#1a2b3c] font-bold'}`}>
-              ESG Hub
+              Esverdant
             </h1>
             <p className={`text-xs ${isDark ? 'text-white/50' : 'text-[#6b7c93]'}`}>
               Sustainability Tracker

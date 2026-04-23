@@ -42,7 +42,7 @@ export default function LandingPage() {
             <div className="w-10 h-10 rounded-xl bg-gradient-sage flex items-center justify-center">
               <span className="text-cloud font-display text-lg">E</span>
             </div>
-            <span className="font-display text-lg text-cloud">ESG Hub</span>
+            <span className="font-display text-lg text-cloud">Esverdant</span>
           </motion.div>
           <motion.div
             initial={{ opacity: 0, x: 20 }}
@@ -287,7 +287,7 @@ export default function LandingPage() {
                 <span className="text-cloud font-display text-lg">E</span>
               </div>
               <div>
-                <h3 className="font-display text-lg text-cloud">ESG Hub</h3>
+                <h3 className="font-display text-lg text-cloud">Esverdant</h3>
                 <p className="text-cloud/50 text-sm font-body">Sustainability Made Simple</p>
               </div>
             </div>

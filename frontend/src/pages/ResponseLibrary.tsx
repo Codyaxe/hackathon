@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Copy, Check, MessageSquare } from 'lucide-react';
 import AppLayout from '../components/layout/AppLayout';
@@ -7,50 +7,93 @@ import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import { useThemeStore } from '../stores/themeStore';
+import { getStoredCompanyProfile } from '../lib/companyProfile';
+import { getResponseLibrary } from '../lib/workflowApi';
+import { formatAiText } from '../lib/aiText';
+import type { ResponseLibraryEntry } from '../types/workflow';
 
-const templates = [
-  {
-    id: '1',
-    title: 'Carbon Reduction Commitment',
-    category: 'Carbon',
-    content: 'Our company is committed to reducing carbon emissions by 40% by 2030, baseline 2020. This includes investments in renewable energy, process optimization, and supply chain sustainability initiatives.',
-  },
-  {
-    id: '2',
-    title: 'Renewable Energy Statement',
-    category: 'Energy',
-    content: 'We source 85% of our operational energy from certified renewable sources, including solar and wind power. Our facilities are equipped with LED lighting and smart energy management systems.',
-  },
-  {
-    id: '3',
-    title: 'Waste Diversion Policy',
-    category: 'Waste',
-    content: 'Our zero-waste initiative has achieved 78% diversion rate from landfill. We partner with certified recycling facilities and have implemented comprehensive sorting and composting programs.',
-  },
-  {
-    id: '4',
-    title: 'ESG Reporting Cadence',
-    category: 'Governance',
-    content: 'We publish comprehensive ESG reports quarterly, with annual verification by independent third-party auditors. Our next report will be published in Q1 2025.',
-  },
-  {
-    id: '5',
-    title: 'Supply Chain Sustainability',
-    category: 'Carbon',
-    content: 'We require all suppliers with contracts exceeding $500K to complete our Supplier Sustainability Assessment. 92% of our top 50 suppliers have certified compliance.',
-  },
-];
+type LibraryTemplate = {
+  id: string;
+  title: string;
+  category: string;
+  content: string;
+};
 
-const categories = ['All', 'Carbon', 'Energy', 'Waste', 'Governance'];
+function toTemplate(entry: ResponseLibraryEntry): LibraryTemplate {
+  const payload = entry.payload as {
+    recommendation_summary?: string;
+    one_page_summary?: string;
+    ai_summary?: string;
+    month?: string;
+    change_summary?: string[];
+  };
+
+  if (entry.entry_type === 'onboarding') {
+    return {
+      id: entry.entry_id,
+      title: 'Onboarding Recommendation',
+      category: 'Onboarding',
+      content: formatAiText(payload.recommendation_summary ?? JSON.stringify(entry.payload, null, 2)),
+    };
+  }
+
+  if (entry.entry_type === 'plan') {
+    return {
+      id: entry.entry_id,
+      title: 'Auto-generated ESG Plan',
+      category: 'Plan',
+      content: formatAiText(payload.one_page_summary ?? JSON.stringify(entry.payload, null, 2)),
+    };
+  }
+
+  if (entry.entry_type === 'upload_extraction') {
+    return {
+      id: entry.entry_id,
+      title: 'File Extraction Summary',
+      category: 'Upload',
+      content: formatAiText(payload.ai_summary ?? JSON.stringify(entry.payload, null, 2)),
+    };
+  }
+
+  return {
+    id: entry.entry_id,
+    title: payload.month ? `Monthly Update ${payload.month}` : 'Monthly Update',
+    category: 'Monthly',
+    content: formatAiText(payload.change_summary?.join('\n') ?? JSON.stringify(entry.payload, null, 2)),
+  };
+}
+
+const categories = ['All', 'Onboarding', 'Plan', 'Upload', 'Monthly'];
 
 export default function ResponseLibrary() {
+  const company = useMemo(() => getStoredCompanyProfile(), []);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
+  const [entries, setEntries] = useState<LibraryTemplate[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
 
-  const filteredTemplates = templates.filter(t => {
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setIsLoading(true);
+        setErrorMessage(null);
+        const response = await getResponseLibrary(company.companyId, 100);
+        setEntries(response.entries.map(toTemplate));
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : 'Could not load response library.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    void load();
+  }, [company.companyId]);
+
+  const filteredTemplates = entries.filter((t) => {
     const matchesSearch = t.title.toLowerCase().includes(search.toLowerCase()) ||
       t.content.toLowerCase().includes(search.toLowerCase());
     const matchesCategory = activeCategory === 'All' || t.category === activeCategory;
@@ -64,10 +107,10 @@ export default function ResponseLibrary() {
   };
 
   const categoryColors: Record<string, 'sage' | 'sand' | 'forest' | 'slate'> = {
-    Carbon: 'sage',
-    Energy: 'sand',
-    Waste: 'forest',
-    Governance: 'slate',
+    Onboarding: 'sage',
+    Plan: 'sand',
+    Upload: 'forest',
+    Monthly: 'slate',
   };
 
   return (
@@ -108,7 +151,19 @@ export default function ResponseLibrary() {
         </motion.div>
 
         {/* Templates */}
+        {errorMessage && (
+          <div className={`rounded-lg p-3 text-sm ${isDark ? 'bg-red-500/10 text-red-300' : 'bg-red-50 text-red-600'}`}>
+            {errorMessage}
+          </div>
+        )}
+
         <div className="grid gap-4">
+          {isLoading && (
+            <Card>
+              <p className={isDark ? 'text-white/55' : 'text-[#6b7c93]'}>Loading library entries...</p>
+            </Card>
+          )}
+
           {filteredTemplates.map((template, index) => (
             <motion.div
               key={template.id}
@@ -121,7 +176,7 @@ export default function ResponseLibrary() {
                   <div className="flex items-center gap-2">
                     <MessageSquare className="w-4 h-4" style={{ color: '#2d9e6b' }} />
                     <h4 className={`font-body font-medium ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>{template.title}</h4>
-                    <Badge variant={categoryColors[template.category]} size="sm">
+                    <Badge variant={categoryColors[template.category] ?? 'slate'} size="sm">
                       {template.category}
                     </Badge>
                   </div>
@@ -137,7 +192,7 @@ export default function ResponseLibrary() {
                     {copiedId === template.id ? 'Copied' : 'Copy'}
                   </Button>
                 </div>
-                <p className={`text-sm leading-relaxed ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>{template.content}</p>
+                <p className={`text-sm leading-relaxed whitespace-pre-line ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>{template.content}</p>
               </Card>
             </motion.div>
           ))}
@@ -145,7 +200,9 @@ export default function ResponseLibrary() {
 
         {filteredTemplates.length === 0 && (
           <div className="text-center py-12">
-            <p className={isDark ? 'text-white/40' : 'text-[#6b7c93]'}>No templates match your search.</p>
+            <p className={isDark ? 'text-white/40' : 'text-[#6b7c93]'}>
+              {isLoading ? 'Loading templates...' : 'No templates match your search.'}
+            </p>
           </div>
         )}
       </div>
