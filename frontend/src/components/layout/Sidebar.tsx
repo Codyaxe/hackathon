@@ -50,7 +50,7 @@ export default function Sidebar() {
           </div>
           <div>
             <h1 className={`font-display text-lg leading-tight ${isDark ? 'text-white font-bold' : 'text-[#1a2b3c] font-bold'}`}>
-              ESG Hub
+              Esverdant
             </h1>
             <p className={`text-xs ${isDark ? 'text-white/50' : 'text-[#6b7c93]'}`}>
               Sustainability Tracker

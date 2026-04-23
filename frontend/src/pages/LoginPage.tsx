@@ -171,7 +171,7 @@ export default function LoginPage() {
               transition={{ delay: 0.2, duration: 0.5 }}
               className="font-display text-5xl text-white mb-4"
             >
-              ESG Hub
+              Esverdant
             </motion.h1>
             <motion.p
               initial={{ opacity: 0 }}

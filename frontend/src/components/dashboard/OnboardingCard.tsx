@@ -248,7 +248,7 @@ export default function OnboardingCard({ onDismiss, onComplete }: OnboardingCard
         </div>
         <div className="flex-1">
           <h3 className={`font-display text-lg mb-1 ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>
-            Welcome to ESG Hub
+            Welcome to Esverdant
           </h3>
           {!quiz && !recommendation && (
             <>

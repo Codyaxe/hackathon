@@ -1,5 +1,5 @@
 ================================================================================
-        ESG HUB - DEMO TUTORIAL: Generate KPIs & Download ESG Report
+        Esverdant - DEMO TUTORIAL: Generate KPIs & Download ESG Report
 ================================================================================
 
 OVERVIEW:
