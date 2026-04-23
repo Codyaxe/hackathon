@@ -1,10 +1,10 @@
-# Esverdant - ESG Reporting Platform for SMEs
+# Esverdant - ESG Reporting Platform for Sustainability
 
-A comprehensive ESG (Environmental, Social, and Governance) reporting platform designed to help small and medium enterprises (SMEs) track sustainability metrics and generate GRI-compliant reports effortlessly.
+A comprehensive ESG (Environmental, Social, and Governance) reporting platform designed to help small and medium enterprises (SMEs) & Campuses track sustainability metrics and generate GRI-compliant reports effortlessly.
 
 ## Overview
 
-Esverdant simplifies sustainability reporting by automating data extraction, calculations, and GRI compliance. From onboarding through monthly check-ins, the platform guides SMEs through sustainability tracking with AI-powered insights and actionable recommendations.
+Esverdant simplifies sustainability reporting by automating data extraction, calculations, and GRI compliance. From onboarding through monthly check-ins, the platform guides users through sustainability tracking with AI-powered insights and actionable recommendations.
 
 ---
 
