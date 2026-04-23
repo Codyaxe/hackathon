@@ -1,4 +1,5 @@
 import type { EnergyData, CarbonData, WasteData, Company, UploadedFile } from '../../types/esg';
+import type { DashboardKPI, ProgressTrackerResponse, QuickWinItem } from '../../types/workflow';
 
 export const company: Company = {
   name: 'Apex Manufacturing Co.',
@@ -62,3 +63,119 @@ export const totalEnergy = energyData.reduce((acc, d) => acc + d.kWh, 0);
 export const totalCarbon = carbonData.reduce((acc, d) => acc + d.total, 0);
 export const totalWaste = wasteData.reduce((acc, d) => acc + d.total, 0);
 export const recyclingRate = (wasteData.reduce((acc, d) => acc + d.recycled, 0) / wasteData.reduce((acc, d) => acc + d.total, 0)) * 100;
+
+const totalScope1 = carbonData.reduce((acc, d) => acc + d.scope1, 0);
+const totalScope2 = carbonData.reduce((acc, d) => acc + d.scope2, 0);
+
+export const dashboardPreviewKpis: DashboardKPI[] = [
+  {
+    name: 'Total Energy',
+    value: Math.round(totalEnergy),
+    unit: 'kWh',
+    rating: 'Best',
+  },
+  {
+    name: 'Scope 1 Emissions',
+    value: Number(totalScope1.toFixed(1)),
+    unit: 't CO2e',
+    rating: 'Better',
+  },
+  {
+    name: 'Scope 2 Emissions',
+    value: Number(totalScope2.toFixed(1)),
+    unit: 't CO2e',
+    rating: 'Better',
+  },
+  {
+    name: 'Waste Generated',
+    value: Number(totalWaste.toFixed(1)),
+    unit: 't',
+    rating: 'Good',
+  },
+  {
+    name: 'New Hire Rate',
+    value: 24,
+    unit: '%',
+    rating: 'Best',
+  },
+  {
+    name: 'Turnover Rate',
+    value: 8,
+    unit: '%',
+    rating: 'Better',
+  },
+  {
+    name: 'GRI Coverage',
+    value: 92,
+    unit: '%',
+    rating: 'Best',
+  },
+];
+
+export const dashboardPreviewQuickWins: QuickWinItem[] = [
+  {
+    title: 'Shift compressor loads to off-peak hours',
+    impact_area: 'Energy',
+    effort: 'low',
+    expected_benefit: 'Reduce electricity spend without changing production output.',
+    why_recommended: 'The monthly energy trend suggests room to flatten demand spikes.',
+    first_step: 'Review the facility load profile and move non-critical compressor runs after peak periods.',
+    estimated_cost_savings_php: 142000,
+  },
+  {
+    title: 'Tighten waste segregation at source',
+    impact_area: 'Waste',
+    effort: 'low',
+    expected_benefit: 'Increase recycling volume and lower landfill costs.',
+    why_recommended: 'Recycling already outperforms landfill, so small process changes have high leverage.',
+    first_step: 'Add clearer bin labels on the production floor and track contamination weekly.',
+    estimated_cost_savings_php: 76000,
+  },
+  {
+    title: 'Standardize monthly evidence uploads',
+    impact_area: 'Reporting',
+    effort: 'medium',
+    expected_benefit: 'Speed up KPI refreshes and reduce manual follow-up.',
+    why_recommended: 'Consistent evidence intake keeps dashboard metrics complete for reporting.',
+    first_step: 'Create one upload checklist for utility bills, fuel invoices, and waste receipts.',
+    estimated_cost_savings_php: 53000,
+  },
+];
+
+export const dashboardPreviewProgress: ProgressTrackerResponse = {
+  company_id: 'apex-manufacturing-co',
+  completion_percentage: 82,
+  maturity_stage: 'improving',
+  steps: [
+    {
+      step_id: 'onboarding',
+      title: 'Onboarding',
+      completed: true,
+      score: 100,
+      improvement_tip: 'Company profile and focus areas are already configured.',
+    },
+    {
+      step_id: 'uploads',
+      title: 'Evidence uploads',
+      completed: true,
+      score: 90,
+      improvement_tip: 'Add more source files to unlock deeper extraction coverage.',
+    },
+    {
+      step_id: 'monthly_checkup',
+      title: 'Monthly checkup',
+      completed: false,
+      score: 72,
+      improvement_tip: 'Submit a checkup to keep KPI trends current.',
+    },
+  ],
+  next_best_actions: [
+    'Upload this month\'s utility invoices',
+    'Review the highest-cost energy accounts',
+    'Run a waste segregation spot check',
+  ],
+  esg_score: 87,
+  compliance_status: 'On Track',
+  kpis: dashboardPreviewKpis,
+  quick_wins_with_savings: dashboardPreviewQuickWins,
+};

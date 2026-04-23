@@ -75,12 +75,12 @@ export default function QuickActions({ quickWins = [], isLoading = false }: Quic
                 key={item.title}
                 className={`rounded-lg p-3 ${isDark ? 'bg-white/5' : 'bg-[#f4f6f9]'}`}
               >
-                <div className="flex items-start justify-between mb-1">
-                  <p className={`text-sm font-medium ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>{item.title}</p>
+                <div className="flex items-start justify-between mb-0.5">
+                  <p className={`min-w-0 flex-1 pr-2 text-sm font-medium leading-snug ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>{item.title}</p>
                   {item.estimated_cost_savings_php && (
-                    <div className="text-right">
+                    <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
                       <p className="text-[10px] uppercase tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.45)' : '#6b7c93' }}>
-                        Est. savings
+                        Est. savings:
                       </p>
                       <span className="text-xs font-semibold" style={{ color: '#2d9e6b' }}>
                         ₱{item.estimated_cost_savings_php.toLocaleString()}
@@ -88,7 +88,7 @@ export default function QuickActions({ quickWins = [], isLoading = false }: Quic
                     </div>
                   )}
                 </div>
-                <p className={`text-xs mt-1 ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>{item.first_step}</p>
+                <p className={`text-xs leading-snug mt-0.5 ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>{item.first_step}</p>
               </div>
             ))}
           </div>

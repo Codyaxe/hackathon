@@ -12,6 +12,14 @@ import { useThemeStore } from '../stores/themeStore';
 import { getStoredCompanyProfile } from '../lib/companyProfile';
 import { getProgress, getQuickWins, getResponseLibrary } from '../lib/workflowApi';
 import type { ProgressTrackerResponse, QuickWinItem, ResponseLibraryEntry } from '../types/workflow';
+import {
+  carbonData,
+  dashboardPreviewProgress,
+  dashboardPreviewQuickWins,
+  energyData,
+  uploadedFiles,
+  wasteData,
+} from '../data/mock/esg-data';
 
 type RecentFile = {
   name: string;
@@ -46,13 +54,21 @@ function parseRecentFiles(entries: ResponseLibraryEntry[]): RecentFile[] {
     .slice(0, 3);
 }
 
+function parseDemoRecentFiles(): RecentFile[] {
+  return uploadedFiles.slice(0, 3).map((file) => ({
+    name: file.name,
+    size: file.size,
+    date: new Date(file.uploadedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+  }));
+}
+
 export default function Dashboard() {
   const profile = useMemo(() => getStoredCompanyProfile(), []);
   const [showOnboarding, setShowOnboarding] = useState(true);
-  const [progress, setProgress] = useState<ProgressTrackerResponse | null>(null);
-  const [quickWins, setQuickWins] = useState<QuickWinItem[]>([]);
+  const [progress, setProgress] = useState<ProgressTrackerResponse | null>(dashboardPreviewProgress);
+  const [quickWins, setQuickWins] = useState<QuickWinItem[]>(dashboardPreviewQuickWins);
   const [libraryEntries, setLibraryEntries] = useState<ResponseLibraryEntry[]>([]);
-  const [isLoadingInsights, setIsLoadingInsights] = useState(true);
+  const [isLoadingInsights, setIsLoadingInsights] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
@@ -96,10 +112,10 @@ export default function Dashboard() {
   }, [refreshDashboard]);
 
   const recentFiles = useMemo(() => parseRecentFiles(libraryEntries), [libraryEntries]);
+  const demoRecentFiles = useMemo(() => parseDemoRecentFiles(), []);
   const completion = progress?.completion_percentage ?? 0;
   const hasCompletedOnboarding = progress?.steps.find((step) => step.step_id === 'onboarding')?.completed ?? false;
-  
-  // Build metrics from real ESG data
+
   const esgScore = progress?.esg_score ?? Math.round(completion);
   const esgScoreLabel: ScoreCard['score'] = esgScore >= 85 ? 'excellent' : esgScore >= 70 ? 'good' : esgScore >= 50 ? 'fair' : 'poor';
   const complianceStatus = progress?.compliance_status ?? 'Needs Attention';
@@ -124,18 +140,18 @@ export default function Dashboard() {
     },
   ];
 
+  const dashboardKpis = progress?.kpis ?? dashboardPreviewProgress.kpis;
+
   return (
     <AppLayout title="Dashboard" subtitle={`${profile.companyName} — ${profile.industry}`}>
       <div className="space-y-6">
-        {/* Onboarding Card */}
         {showOnboarding && !hasCompletedOnboarding && (
           <OnboardingCard onDismiss={() => setShowOnboarding(false)} onComplete={refreshDashboard} />
         )}
 
-        {/* Quick Actions */}
         <QuickActions
           quickWins={quickWins}
-          isLoading={isLoadingInsights}
+          isLoading={isLoadingInsights && quickWins.length === 0}
         />
 
         {apiError && (
@@ -144,21 +160,19 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Metrics Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {metrics.map((metric, index) => (
             <MetricCard key={metric.label} data={metric} delay={0.2 + index * 0.1} />
           ))}
         </div>
 
-        {/* KPIs Grid */}
-        {progress?.kpis && progress.kpis.length > 0 && (
+        {dashboardKpis.length > 0 && (
           <div className="space-y-3">
             <h2 className={`text-lg font-display font-semibold ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>
               Key Performance Indicators
             </h2>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {progress.kpis.map((kpi, index) => {
+              {dashboardKpis.map((kpi, index) => {
                 const ratingColor = kpi.rating === 'Best' ? '#2d9e6b' : kpi.rating === 'Better' ? '#2D6A4F' : '#D4A574';
                 return (
                   <motion.div
@@ -191,15 +205,13 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Charts Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <EnergyLineChart data={[]} />
-          <CarbonBarChart data={[]} />
+          <EnergyLineChart data={energyData} />
+          <CarbonBarChart data={carbonData} />
         </div>
 
-        {/* Bottom Row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <WasteDonutChart data={[]} />
+          <WasteDonutChart data={wasteData} />
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -216,9 +228,7 @@ export default function Dashboard() {
               Recent Files
             </h3>
             <div className="space-y-3">
-              {(recentFiles.length > 0 ? recentFiles : [
-                { name: 'No uploads yet', size: 'Run Data Input upload', date: '--' },
-              ]).map((file) => (
+              {(recentFiles.length > 0 ? recentFiles : demoRecentFiles).map((file) => (
                 <div
                   key={file.name}
                   className={`
