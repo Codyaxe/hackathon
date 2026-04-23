@@ -1,0 +1,63 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply text-[#1a2b3c] font-body antialiased;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Light mode defaults */
+  body {
+    background-color: #f4f6f9;
+    color: #1a2b3c;
+  }
+
+  ::selection {
+    background-color: rgba(45, 158, 107, 0.3);
+    color: #1a2b3c;
+  }
+
+  ::-webkit-scrollbar {
+    @apply w-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    background-color: #f4f6f9;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 rounded-full hover:bg-gray-400;
+  }
+
+  /* Dark mode scrollbar */
+  .dark ::-webkit-scrollbar-track {
+    background-color: #0a1628;
+  }
+
+  .dark ::-webkit-scrollbar-thumb {
+    background-color: #1a3a5c;
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background-color: #2d4a6c;
+  }
+}
+
+@layer components {
+  .glow-hover {
+    @apply transition-shadow duration-300;
+  }
+}

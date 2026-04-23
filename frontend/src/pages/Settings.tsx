@@ -1,0 +1,248 @@
+import { useState } from 'react';
+import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
+import { Building2, MapPin, Bell, Shield, Database, LogOut, RotateCcw } from 'lucide-react';
+import AppLayout from '../components/layout/AppLayout';
+import Input from '../components/ui/Input';
+import Button from '../components/ui/Button';
+import Card from '../components/ui/Card';
+import { getStoredCompanyProfile, saveCompanyProfile } from '../lib/companyProfile';
+import { useThemeStore } from '../stores/themeStore';
+import { resetWorkflowArtifacts } from '../lib/workflowApi';
+
+export default function Settings() {
+  const navigate = useNavigate();
+  const [profile, setProfile] = useState(getStoredCompanyProfile());
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
+  const { theme } = useThemeStore();
+  const isDark = theme === 'dark';
+
+  const handleSignOut = () => {
+    localStorage.removeItem('esg_auth');
+    navigate('/login', { replace: true });
+  };
+
+  const handleSaveProfile = () => {
+    const saved = saveCompanyProfile(profile);
+    setProfile(saved);
+    setSaveMessage('Company profile updated successfully.');
+    setTimeout(() => setSaveMessage(null), 3000);
+  };
+
+  const handleResetReporting = async () => {
+    const confirmed = window.confirm(
+      'Reset GRI disclosures and KPI progress data for this company? This clears uploads, extractions, monthly updates, and computed report snapshots.',
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setIsResetting(true);
+      const result = await resetWorkflowArtifacts(profile.companyId);
+      setResetMessage(result.message);
+      setTimeout(() => setResetMessage(null), 4000);
+    } catch (error) {
+      setResetMessage(error instanceof Error ? error.message : 'Failed to reset ESG reporting artifacts.');
+      setTimeout(() => setResetMessage(null), 5000);
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  return (
+    <AppLayout title="Settings" subtitle="Manage your account and preferences">
+      <div className="max-w-3xl space-y-6">
+        {/* Company Info */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <Card>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #2d9e6b 0%, #1B4332 100%)' }}>
+                <Building2 className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 className={`font-display ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>Company Information</h3>
+                <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>Update your company details</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <Input
+                label="Company Name"
+                value={profile.companyName}
+                onChange={(event) => setProfile((prev) => ({ ...prev, companyName: event.target.value }))}
+              />
+              <Input
+                label="Company ID"
+                value={profile.companyId}
+                disabled
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={`block text-sm font-medium mb-1.5 ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>Industry</label>
+                  <select
+                    value={profile.industry}
+                    onChange={(event) => setProfile((prev) => ({ ...prev, industry: event.target.value }))}
+                    className={`w-full border rounded-lg px-4 py-2.5 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-[#2d9e6b]/40 focus:border-[#2d9e6b] ${
+                      isDark
+                        ? 'bg-[#0f2040] border-white/15 text-white'
+                        : 'bg-white border-[#e2e8f0] text-[#1a2b3c]'
+                    }`}
+                  >
+                    <option>Manufacturing</option>
+                    <option>Technology</option>
+                    <option>Healthcare</option>
+                    <option>Finance</option>
+                    <option>Retail</option>
+                  </select>
+                </div>
+                <Input
+                  label="Employee Count"
+                  type="number"
+                  min={1}
+                  value={String(profile.employeeCount)}
+                  onChange={(event) => {
+                    const nextCount = Number.parseInt(event.target.value, 10);
+                    setProfile((prev) => ({
+                      ...prev,
+                      employeeCount: Number.isNaN(nextCount) ? prev.employeeCount : nextCount,
+                    }));
+                  }}
+                />
+              </div>
+              <Input
+                label="Location"
+                value={profile.location ?? ''}
+                onChange={(event) => setProfile((prev) => ({ ...prev, location: event.target.value }))}
+                icon={<MapPin className="w-4 h-4" />}
+              />
+              <Input
+                label="Primary Country"
+                value={profile.primaryCountry ?? ''}
+                onChange={(event) => setProfile((prev) => ({ ...prev, primaryCountry: event.target.value }))}
+              />
+            </div>
+          </Card>
+        </motion.div>
+
+        {/* Notifications */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <Card>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'rgba(212, 165, 116, 0.2)' }}>
+                <Bell className="w-5 h-5" style={{ color: '#D4A574' }} />
+              </div>
+              <div>
+                <h3 className={`font-display ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>Notifications</h3>
+                <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>Configure your alerts and reminders</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {[
+                { label: 'Weekly summary email', checked: true },
+                { label: 'Monthly report reminder', checked: true },
+                { label: 'Data upload confirmation', checked: false },
+                { label: 'ESG score changes', checked: true },
+              ].map((item) => (
+                <label key={item.label} className="flex items-center justify-between cursor-pointer group">
+                  <span className={isDark ? 'text-white/55' : 'text-[#6b7c93]'}>{item.label}</span>
+                  <div
+                    className="relative w-11 h-6 rounded-full transition-colors cursor-pointer"
+                    style={{ backgroundColor: item.checked ? '#2d9e6b' : isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0' }}
+                  >
+                    <div
+                      className="absolute top-1 w-4 h-4 rounded-full bg-white transition-all"
+                      style={{ left: item.checked ? '24px' : '4px' }}
+                    />
+                  </div>
+                </label>
+              ))}
+            </div>
+          </Card>
+        </motion.div>
+
+        {/* Data & Privacy */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <Card>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'rgba(45, 106, 79, 0.2)' }}>
+                <Shield className="w-5 h-5" style={{ color: '#2D6A4F' }} />
+              </div>
+              <div>
+                <h3 className={`font-display ${isDark ? 'text-white' : 'text-[#1a2b3c]'}`}>Data & Privacy</h3>
+                <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>Manage your data and privacy settings</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <Button variant="secondary" icon={<Database className="w-4 h-4" />}>
+                Export All Data
+              </Button>
+              <p className={`text-xs ${isDark ? 'text-white/40' : 'text-[#6b7c93]'}`}>
+                Download a complete copy of all your ESG data in CSV format.
+              </p>
+
+              <div className={`pt-4 ${isDark ? 'border-t border-white/10' : 'border-t border-[#e2e8f0]'}`}>
+                <Button
+                  variant="danger"
+                  icon={<RotateCcw className="w-4 h-4" />}
+                  onClick={handleResetReporting}
+                  loading={isResetting}
+                >
+                  Reset GRI & KPI Data
+                </Button>
+                <p className={`mt-2 text-xs ${isDark ? 'text-white/40' : 'text-[#6b7c93]'}`}>
+                  Clears workflow uploads, extracted metrics, monthly updates, and computed GRI/KPI snapshots for this company.
+                </p>
+                {resetMessage && (
+                  <p className={`mt-2 text-sm ${isDark ? 'text-[#f2d58b]' : 'text-[#9a6b00]'}`}>
+                    {resetMessage}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className={`mt-6 pt-6 ${isDark ? 'border-t border-white/10' : 'border-t border-[#e2e8f0]'}`}>
+              <Button
+                variant="danger"
+                icon={<LogOut className="w-4 h-4" />}
+                onClick={handleSignOut}
+              >
+                Sign Out
+              </Button>
+            </div>
+          </Card>
+        </motion.div>
+
+        {/* Save Button */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+          className="flex items-center justify-end gap-3"
+        >
+          {saveMessage && (
+            <span className={`text-sm ${isDark ? 'text-[#9edab9]' : 'text-[#2d9e6b]'}`}>
+              {saveMessage}
+            </span>
+          )}
+          <Button onClick={handleSaveProfile}>Save Changes</Button>
+        </motion.div>
+      </div>
+    </AppLayout>
+  );
+}
