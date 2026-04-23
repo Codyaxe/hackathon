@@ -281,7 +281,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Vision
 
-Esverdant empowers SMEs to embrace sustainability reporting not as a compliance burden, but as a strategic opportunity. By automating GRI reporting and providing AI-driven insights, we help businesses track what matters, measure progress, and unlock cost savings while contributing to global sustainability goals.
+Esverdant embrace sustainability reporting not as a compliance burden, but as a strategic opportunity. By automating GRI reporting and providing AI-driven insights, we help businesses track what matters, measure progress, and unlock cost savings while contributing to global sustainability goals.
 
 ---
 
