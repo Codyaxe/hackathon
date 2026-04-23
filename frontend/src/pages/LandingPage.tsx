@@ -70,8 +70,8 @@ export default function LandingPage() {
             transition={{ duration: 0.8, delay: 0.1 }}
           >
             <h1 className="font-display text-4xl md:text-6xl lg:text-7xl text-cloud mb-6 leading-tight">
-              Sustainability Tracking for{' '}
-              <span className="bg-gradient-sage bg-clip-text text-transparent">Modern Manufacturers</span>
+              Built for Sustainability.{' '}
+              <span className="bg-gradient-sage bg-clip-text text-transparent">Ready for Global Standards.</span>
             </h1>
           </motion.div>
           <motion.p
