@@ -920,6 +920,10 @@ class ESGWorkflowService:
         )
 
         recommended_next_actions = self._next_actions_from_changes(submission.changes)
+        quick_wins_snapshot = await self.get_quick_wins(submission.company_id)
+        generated_quick_wins_snapshot = [
+            item.title for item in quick_wins_snapshot.quick_wins
+        ]
 
         payload = {
             "month": submission.month,
@@ -928,6 +932,7 @@ class ESGWorkflowService:
             "change_summary": summary,
             "updated_focus_areas": [item.model_dump() for item in updated_focus],
             "recommended_next_actions": recommended_next_actions,
+            "generated_quick_wins_snapshot": generated_quick_wins_snapshot,
             "submitted_at": self._utc_now_iso(),
         }
 

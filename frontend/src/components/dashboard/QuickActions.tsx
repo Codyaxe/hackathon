@@ -14,10 +14,9 @@ const actions = [
 interface QuickActionsProps {
   quickWins?: QuickWinItem[];
   isLoading?: boolean;
-  requiresMonthlyData?: boolean;
 }
 
-export default function QuickActions({ quickWins = [], isLoading = false, requiresMonthlyData = false }: QuickActionsProps) {
+export default function QuickActions({ quickWins = [], isLoading = false }: QuickActionsProps) {
   const navigate = useNavigate();
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
@@ -62,10 +61,6 @@ export default function QuickActions({ quickWins = [], isLoading = false, requir
         </div>
         {isLoading ? (
           <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>Loading recommendations...</p>
-        ) : requiresMonthlyData ? (
-          <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>
-            Submit your monthly checkup first to unlock quick-win recommendations.
-          </p>
         ) : quickWins.length === 0 ? (
           <p className={`text-sm ${isDark ? 'text-white/55' : 'text-[#6b7c93]'}`}>
             Upload evidence files first to get AI-generated quick-win recommendations.
